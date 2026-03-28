@@ -1,4 +1,4 @@
-"""Shared fixtures for the Joti Sim test suite.
+"""Shared fixtures for the PurpleLab test suite.
 
 Handles both current (backend.generators) and future (backend.engine.generators)
 import paths gracefully.

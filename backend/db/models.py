@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for Joti Sim.
+"""SQLAlchemy ORM models for PurpleLab.
 
 All tables use SQLAlchemy 2.0 Mapped[] type hints.
 """

@@ -14,7 +14,7 @@ from celery import Celery
 from backend.config import settings
 
 celery_app = Celery(
-    "joti_sim",
+    "purplelab",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
 )

@@ -1,4 +1,4 @@
-# Joti Sim v2 — Development Roadmap
+# PurpleLab v2 — Development Roadmap
 
 ## What's Built (Phases 1-3)
 
@@ -11,7 +11,7 @@
 - [x] Config via pydantic-settings (.env)
 - [x] Core utilities (encryption, exceptions, constants, schemas)
 - [x] Docker Compose with health checks
-- [x] Autonomous setup script (joti.sh)
+- [x] Autonomous setup script (purplelab.sh)
 
 ### Phase 2: Knowledge Base + Threat Intelligence — DONE
 - [x] ChromaDB vector store with async wrappers + in-memory fallback
@@ -268,7 +268,7 @@ Priority: LOW (for now)
 
 | Area | Key Files |
 |---|---|
-| Master script | `joti.sh` |
+| Master script | `purplelab.sh` |
 | Backend entry | `backend/main.py` |
 | Config | `backend/config.py`, `.env` |
 | DB models | `backend/db/models.py` |

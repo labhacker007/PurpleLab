@@ -73,7 +73,7 @@ export default function ChatPage() {
         id: generateId(),
         role: "assistant",
         content:
-          "I'm the Joti Sim assistant. This is a placeholder response. Once the backend chat API is connected, I'll be able to help you build environments, import rules, and test detection coverage.",
+          "I'm the PurpleLab assistant. This is a placeholder response. Once the backend chat API is connected, I'll be able to help you build environments, import rules, and test detection coverage.",
         created_at: new Date().toISOString(),
       }
       addMessage(conv!.id, assistantMsg)
@@ -129,7 +129,7 @@ export default function ChatPage() {
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <Bot className="h-12 w-12 text-muted mx-auto mb-4" />
-              <h2 className="text-lg font-semibold text-text">Joti Sim Assistant</h2>
+              <h2 className="text-lg font-semibold text-text">PurpleLab Assistant</h2>
               <p className="text-sm text-muted mt-1 max-w-md">
                 Ask me to build security environments, import detection rules, simulate threat
                 actors, or analyze coverage gaps.

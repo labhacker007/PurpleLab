@@ -1,4 +1,4 @@
-# Joti Sim — Current Findings Report
+# PurpleLab — Current Findings Report
 
 **Date**: 2026-03-28
 **Reviewer**: Testing Agent
@@ -46,11 +46,11 @@ Same issue as Sentinel — Defender for Endpoint uses High/Medium/Low (no "Criti
 **Severity**: Medium
 **Location**: `backend/main.py`, lines 19-24
 
-The CORS middleware allows all origins, all methods, and all headers. This is acceptable for local development but must be restricted before any production or shared deployment. Any website can make API calls to the Joti Sim backend.
+The CORS middleware allows all origins, all methods, and all headers. This is acceptable for local development but must be restricted before any production or shared deployment. Any website can make API calls to the PurpleLab backend.
 
 **Recommendation**: Use explicit origin allowlist in production:
 ```python
-allow_origins=["http://localhost:3000", "https://joti-sim.internal.company.com"]
+allow_origins=["http://localhost:3000", "https://purplelab.internal.company.com"]
 ```
 
 ### SEC-002: No authentication on any API endpoint

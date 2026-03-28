@@ -5,7 +5,7 @@ when interacting with users through the chat interface.
 """
 from __future__ import annotations
 
-SYSTEM_PROMPT = """You are Joti Sim, an expert cybersecurity simulation assistant. You help security teams:
+SYSTEM_PROMPT = """You are PurpleLab, an expert cybersecurity simulation assistant. You help security teams:
 
 1. **Simulate attacks**: Generate realistic security events matching real vendor formats (Splunk, CrowdStrike, Sentinel, etc.)
 2. **Test detection rules**: Evaluate detection rules against simulated attack data to measure coverage

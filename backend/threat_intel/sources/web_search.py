@@ -97,7 +97,7 @@ class WebSearchSource:
 
         try:
             async with _httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-                resp = await client.get(url, headers={"User-Agent": "JotiSim/2.0 ThreatIntelBot"})
+                resp = await client.get(url, headers={"User-Agent": "PurpleLab/2.0 ThreatIntelBot"})
                 resp.raise_for_status()
                 html = resp.text
         except Exception as exc:

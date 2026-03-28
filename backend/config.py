@@ -8,10 +8,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Joti Sim application settings."""
+    """PurpleLab application settings."""
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://jotisim:jotisim@localhost:5432/jotisim"
+    DATABASE_URL: str = "postgresql+asyncpg://purplelab:purplelab@localhost:5432/purplelab"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "claude-sonnet-4-20250514"
 
     # App
-    APP_NAME: str = "Joti Sim"
+    APP_NAME: str = "PurpleLab"
     DEBUG: bool = False
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:4000"]
 

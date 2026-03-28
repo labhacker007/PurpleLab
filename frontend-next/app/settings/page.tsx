@@ -147,7 +147,7 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="text-sm">Anthropic API Key</CardTitle>
               <CardDescription>
-                Used for the Joti Sim AI assistant and rule generation.
+                Used for the PurpleLab AI assistant and rule generation.
               </CardDescription>
             </CardHeader>
             <CardContent>

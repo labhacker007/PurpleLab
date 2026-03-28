@@ -42,7 +42,7 @@ export function Sidebar() {
         </div>
         {!sidebarCollapsed && (
           <div>
-            <div className="text-sm font-semibold text-text">Joti Sim</div>
+            <div className="text-sm font-semibold text-text">PurpleLab</div>
             <div className="text-[10px] text-muted">Security Simulator</div>
           </div>
         )}

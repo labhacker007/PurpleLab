@@ -1,10 +1,10 @@
-# Joti Sim — Universal Security Product Simulator
+# PurpleLab — Universal Security Product Simulator
 
 **Build realistic security lab environments in minutes.** Drag-and-drop security products onto a canvas, connect them to your SOAR/TIP platform, and get production-quality test data flowing instantly.
 
 ## What This Is
 
-Joti Sim is a standalone simulation platform that mimics real-world security products — SIEMs, EDRs, identity providers, email gateways, vulnerability scanners, ITSM tools, and cloud security. Each simulator generates realistic alerts, events, and findings that match the actual vendor's API format.
+PurpleLab is a standalone simulation platform that mimics real-world security products — SIEMs, EDRs, identity providers, email gateways, vulnerability scanners, ITSM tools, and cloud security. Each simulator generates realistic alerts, events, and findings that match the actual vendor's API format.
 
 **Not a mock.** Not placeholder data. Each simulator reverse-engineers the real product's webhook/API payload structure and generates events that are indistinguishable from production data.
 
@@ -63,7 +63,7 @@ Joti Sim is a standalone simulation platform that mimics real-world security pro
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  JOTI SIM — Frontend (React + drag-and-drop canvas)         │
+│  PURPLELAB — Frontend (React + drag-and-drop canvas)         │
 │                                                              │
 │  ┌──────┐ ┌──────────┐ ┌──────┐ ┌──────┐                   │
 │  │Splunk│→│CrowdStrike│→│ Okta │→│ Joti │                   │
@@ -75,7 +75,7 @@ Joti Sim is a standalone simulation platform that mimics real-world security pro
                │
                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  JOTI SIM — Backend (FastAPI + generator engine)            │
+│  PURPLELAB — Backend (FastAPI + generator engine)            │
 │                                                              │
 │  SimulationEngine                                            │
 │    ├── SessionManager     (create/start/stop sessions)       │
@@ -96,8 +96,8 @@ Joti Sim is a standalone simulation platform that mimics real-world security pro
 
 ```bash
 # Clone
-git clone https://github.com/labhacker007/joti-sim.git
-cd joti-sim
+git clone https://github.com/labhacker007/purplelab.git
+cd purplelab
 
 # Run with Docker
 docker compose up -d
@@ -122,7 +122,7 @@ python -m uvicorn backend.main:app --port 4000
 ## Connecting to Joti
 
 ```
-Joti Sim (port 4000)  ──webhook──→  Joti Platform (port 8000)
+PurpleLab (port 4000)  ──webhook──→  Joti Platform (port 8000)
                                      /api/alerts/ingest/{token}
 ```
 

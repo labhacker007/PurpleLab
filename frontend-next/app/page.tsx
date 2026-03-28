@@ -21,7 +21,7 @@ export default function DashboardPage() {
     <div className="max-w-6xl mx-auto space-y-8">
       {/* Welcome */}
       <div>
-        <h1 className="text-2xl font-bold text-text">Welcome to Joti Sim</h1>
+        <h1 className="text-2xl font-bold text-text">Welcome to PurpleLab</h1>
         <p className="text-muted mt-1">
           Build security lab environments, import detection rules, and test coverage against threat actors.
         </p>

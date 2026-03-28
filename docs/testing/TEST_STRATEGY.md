@@ -1,8 +1,8 @@
-# Joti Sim — Test Strategy
+# PurpleLab — Test Strategy
 
 ## Testing Philosophy
 
-Joti Sim is a cybersecurity simulation platform that generates vendor-format alert payloads. Our testing strategy prioritizes:
+PurpleLab is a cybersecurity simulation platform that generates vendor-format alert payloads. Our testing strategy prioritizes:
 
 1. **Payload fidelity** — Every generator must produce payloads that match the real vendor's documented format. A malformed payload means the simulator is useless for testing downstream SOC tooling.
 2. **Engine reliability** — Sessions must start, run, and stop cleanly without leaking resources (schedulers, HTTP clients, memory).

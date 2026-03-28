@@ -1,13 +1,13 @@
-"""Custom exception hierarchy for Joti Sim.
+"""Custom exception hierarchy for PurpleLab.
 
-All application-specific exceptions inherit from JotiSimError so that
+All application-specific exceptions inherit from PurpleLabError so that
 a single exception handler in FastAPI can catch and format them consistently.
 """
 from __future__ import annotations
 
 
-class JotiSimError(Exception):
-    """Base exception for all Joti Sim errors."""
+class PurpleLabError(Exception):
+    """Base exception for all PurpleLab errors."""
 
     def __init__(self, message: str = "An error occurred", status_code: int = 500):
         self.message = message
@@ -15,7 +15,7 @@ class JotiSimError(Exception):
         super().__init__(self.message)
 
 
-class NotFoundError(JotiSimError):
+class NotFoundError(PurpleLabError):
     """Resource not found."""
 
     def __init__(self, resource: str = "Resource", identifier: str = ""):
@@ -25,14 +25,14 @@ class NotFoundError(JotiSimError):
         super().__init__(message=detail, status_code=404)
 
 
-class ValidationError(JotiSimError):
+class ValidationError(PurpleLabError):
     """Input validation failed."""
 
     def __init__(self, message: str = "Validation error"):
         super().__init__(message=message, status_code=422)
 
 
-class SIEMConnectionError(JotiSimError):
+class SIEMConnectionError(PurpleLabError):
     """Failed to connect to a SIEM platform."""
 
     def __init__(self, siem_type: str = "", message: str = ""):
@@ -44,21 +44,21 @@ class SIEMConnectionError(JotiSimError):
         super().__init__(message=detail, status_code=502)
 
 
-class AgentError(JotiSimError):
+class AgentError(PurpleLabError):
     """Error in the AI agent orchestration layer."""
 
     def __init__(self, message: str = "Agent error"):
         super().__init__(message=message, status_code=500)
 
 
-class RateLimitError(JotiSimError):
+class RateLimitError(PurpleLabError):
     """Rate limit exceeded."""
 
     def __init__(self, message: str = "Rate limit exceeded"):
         super().__init__(message=message, status_code=429)
 
 
-class EncryptionError(JotiSimError):
+class EncryptionError(PurpleLabError):
     """Encryption or decryption failure."""
 
     def __init__(self, message: str = "Encryption error"):

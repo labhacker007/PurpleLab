@@ -1,4 +1,4 @@
-"""Joti Sim — FastAPI backend serving simulation engine + static frontend.
+"""PurpleLab — FastAPI backend serving simulation engine + static frontend.
 
 Mounts legacy v1 routes at /api/ and new v2 routes at /api/v2/.
 """
@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from backend.config import settings
-from backend.core.exceptions import JotiSimError
+from backend.core.exceptions import PurpleLabError
 from backend.api.legacy import router as legacy_router
 from backend.api.v2 import v2_router
 
@@ -36,9 +36,9 @@ app.add_middleware(
 
 # ── Exception Handlers ───────────────────────────────────────────────────────
 
-@app.exception_handler(JotiSimError)
-async def jotisim_error_handler(request: Request, exc: JotiSimError):
-    """Handle all JotiSimError subclasses with consistent JSON responses."""
+@app.exception_handler(PurpleLabError)
+async def purplelab_error_handler(request: Request, exc: PurpleLabError):
+    """Handle all PurpleLabError subclasses with consistent JSON responses."""
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": exc.message, "status_code": exc.status_code},
@@ -64,7 +64,7 @@ async def on_startup():
     TODO: Initialize Redis connection pool.
     TODO: Register agent tools.
     """
-    logging.getLogger(__name__).info("Joti Sim v2 starting up")
+    logging.getLogger(__name__).info("PurpleLabulator v2 starting up")
 
 
 @app.on_event("shutdown")
@@ -75,7 +75,7 @@ async def on_shutdown():
     TODO: Close Redis connections.
     TODO: Shut down all running simulation schedulers.
     """
-    logging.getLogger(__name__).info("Joti Sim v2 shutting down")
+    logging.getLogger(__name__).info("PurpleLabulator v2 shutting down")
 
 
 # ── Serve Frontend ────────────────────────────────────────────────────────────

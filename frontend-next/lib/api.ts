@@ -1,5 +1,5 @@
 /**
- * Fetch wrapper with error handling for the Joti Sim API.
+ * Fetch wrapper with error handling for the PurpleLab API.
  * All requests go through the Next.js rewrite proxy (/api/* -> localhost:4000).
  */
 

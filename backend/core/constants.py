@@ -1,4 +1,4 @@
-"""Shared constants used throughout Joti Sim."""
+"""Shared constants used throughout PurpleLab."""
 from __future__ import annotations
 
 # ── MITRE ATT&CK Tactics (Enterprise) ────────────────────────────────────────

@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║  JOTI SIM v2 — Single Master Script                                     ║
+# ║  PURPLELAB v2 — Single Master Script                                     ║
 # ║  Installs Docker, builds, launches, heals, and manages everything.      ║
 # ║  Zero AI tokens. Fully autonomous. Self-healing.                        ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 #
 # Usage:
-#   ./joti.sh                   # First-time setup (installs Docker if needed)
-#   ./joti.sh up                # Start all services
-#   ./joti.sh down              # Stop all services
-#   ./joti.sh restart           # Restart everything
-#   ./joti.sh build             # Rebuild Docker images from scratch
-#   ./joti.sh status            # Health check all services
-#   ./joti.sh heal              # Auto-diagnose and fix problems
-#   ./joti.sh logs [service]    # Tail logs (all or specific service)
-#   ./joti.sh test              # Run full test suite
-#   ./joti.sh migrate           # Run database migrations
-#   ./joti.sh seed              # Load MITRE ATT&CK data
-#   ./joti.sh frontend          # Install and start Next.js dev server
-#   ./joti.sh reset-password    # Reset PostgreSQL password
-#   ./joti.sh reset-all         # Nuclear: destroy and rebuild everything
-#   ./joti.sh shell [service]   # Open shell into a container
-#   ./joti.sh db-shell          # Open psql shell
-#   ./joti.sh update            # Git pull + rebuild + restart
-#   ./joti.sh backup            # Backup database
-#   ./joti.sh restore <file>    # Restore database from backup
+#   ./purplelab.sh                   # First-time setup (installs Docker if needed)
+#   ./purplelab.sh up                # Start all services
+#   ./purplelab.sh down              # Stop all services
+#   ./purplelab.sh restart           # Restart everything
+#   ./purplelab.sh build             # Rebuild Docker images from scratch
+#   ./purplelab.sh status            # Health check all services
+#   ./purplelab.sh heal              # Auto-diagnose and fix problems
+#   ./purplelab.sh logs [service]    # Tail logs (all or specific service)
+#   ./purplelab.sh test              # Run full test suite
+#   ./purplelab.sh migrate           # Run database migrations
+#   ./purplelab.sh seed              # Load MITRE ATT&CK data
+#   ./purplelab.sh frontend          # Install and start Next.js dev server
+#   ./purplelab.sh reset-password    # Reset PostgreSQL password
+#   ./purplelab.sh reset-all         # Nuclear: destroy and rebuild everything
+#   ./purplelab.sh shell [service]   # Open shell into a container
+#   ./purplelab.sh db-shell          # Open psql shell
+#   ./purplelab.sh update            # Git pull + rebuild + restart
+#   ./purplelab.sh backup            # Backup database
+#   ./purplelab.sh restore <file>    # Restore database from backup
 
 set -uo pipefail
 
@@ -39,7 +39,7 @@ ENV_FILE=".env"
 FRONTEND_DIR="frontend-next"
 DATA_DIR="data"
 BACKUP_DIR="backups"
-LOG_FILE=".joti-setup.log"
+LOG_FILE=".purplelab-setup.log"
 MAX_WAIT=60
 POLL=2
 
@@ -62,7 +62,7 @@ step() { printf "\n${W}━━━ %s ━━━${N}\n\n" "$*"; }
 banner() {
     printf "\n${C}"
     printf "    ┌─────────────────────────────────────────────────────┐\n"
-    printf "    │     Joti Sim v2 — Agentic Cybersecurity Platform    │\n"
+    printf "    │     PurpleLabulator v2 — Agentic Cybersecurity Platform    │\n"
     printf "    │            Autonomous Setup & Control               │\n"
     printf "    └─────────────────────────────────────────────────────┘\n"
     printf "${N}\n"
@@ -249,7 +249,7 @@ setup_env() {
     if [ ! -f "$ENV_FILE" ]; then
         # Generate a random password for PostgreSQL
         local pg_pass
-        pg_pass=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 24 || echo "jotisim_$(date +%s)")
+        pg_pass=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 24 || echo "purplelab_$(date +%s)")
 
         # Generate Fernet key for encryption
         local enc_key
@@ -260,7 +260,7 @@ setup_env() {
                   echo "$(LC_ALL=C tr -dc 'A-Za-z0-9_-' </dev/urandom 2>/dev/null | head -c 43)=")
 
         cat > "$ENV_FILE" << ENVEOF
-# ── Joti Sim v2 Configuration ──────────────────────────────────────────
+# ── PurpleLabulator v2 Configuration ──────────────────────────────────────────
 # Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 # Database
@@ -340,7 +340,7 @@ cmd_up() {
     docker compose -f "$COMPOSE_FILE" up -d 2>&1 | grep -v "^$"
     ok "Containers started"
 
-    wait_for "PostgreSQL" "docker compose exec -T postgres pg_isready -U jotisim"
+    wait_for "PostgreSQL" "docker compose exec -T postgres pg_isready -U purplelab"
     wait_for "Redis"      "docker compose exec -T redis redis-cli ping 2>/dev/null | grep -q PONG"
 
     # Auto-migrate database
@@ -374,7 +374,7 @@ cmd_migrate() {
 }
 
 cmd_migrate_quiet() {
-    docker compose exec -T joti-sim python -c "
+    docker compose exec -T purplelab python -c "
 import asyncio, logging
 logging.disable(logging.CRITICAL)
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -397,7 +397,7 @@ print('OK')
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd_seed() {
     step "Seeding MITRE ATT&CK Data"
-    docker compose exec -T joti-sim python scripts/seed_mitre.py 2>&1 || \
+    docker compose exec -T purplelab python scripts/seed_mitre.py 2>&1 || \
         warn "Seed deferred — MITRE data will download on first use"
     ok "Seed complete"
 }
@@ -417,11 +417,11 @@ cmd_status() {
     # Health checks
     local all_ok=true
 
-    if docker compose exec -T postgres pg_isready -U jotisim &>/dev/null 2>&1; then
+    if docker compose exec -T postgres pg_isready -U purplelab &>/dev/null 2>&1; then
         ok "PostgreSQL: healthy"
         # Show table count
         local tc
-        tc=$(docker compose exec -T postgres psql -U jotisim -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "?")
+        tc=$(docker compose exec -T postgres psql -U purplelab -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || echo "?")
         info "  Tables: $tc"
     else
         fail "PostgreSQL: down"
@@ -453,14 +453,14 @@ cmd_status() {
     if curl -sf http://localhost:3000 &>/dev/null; then
         ok "Frontend: healthy (http://localhost:3000)"
     else
-        info "Frontend: not running (run './joti.sh frontend' to start)"
+        info "Frontend: not running (run './purplelab.sh frontend' to start)"
     fi
 
     echo ""
     if $all_ok; then
         ok "All core systems operational"
     else
-        warn "Issues detected — run './joti.sh heal' to auto-repair"
+        warn "Issues detected — run './purplelab.sh heal' to auto-repair"
     fi
 }
 
@@ -525,10 +525,10 @@ cmd_heal() {
 
     # 5. PostgreSQL
     info "Checking PostgreSQL..."
-    if ! docker compose exec -T postgres pg_isready -U jotisim &>/dev/null 2>&1; then
+    if ! docker compose exec -T postgres pg_isready -U purplelab &>/dev/null 2>&1; then
         warn "PostgreSQL unreachable. Restarting..."
         docker compose restart postgres 2>/dev/null
-        if wait_for "PostgreSQL" "docker compose exec -T postgres pg_isready -U jotisim"; then
+        if wait_for "PostgreSQL" "docker compose exec -T postgres pg_isready -U purplelab"; then
             fixed=$((fixed + 1))
         else
             fail "PostgreSQL recovery failed"
@@ -541,7 +541,7 @@ cmd_heal() {
     # 6. PostgreSQL tables
     info "Checking database tables..."
     local table_count
-    table_count=$(docker compose exec -T postgres psql -U jotisim -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null | tr -d ' \r\n' || echo "0")
+    table_count=$(docker compose exec -T postgres psql -U purplelab -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null | tr -d ' \r\n' || echo "0")
     if [ "${table_count:-0}" -lt 5 ] 2>/dev/null; then
         warn "Only $table_count tables found. Running migrations..."
         cmd_migrate_quiet
@@ -569,14 +569,14 @@ cmd_heal() {
     info "Checking Backend API..."
     if ! curl -sf http://localhost:4000/api/catalog &>/dev/null; then
         warn "Backend API unreachable. Checking logs..."
-        docker compose logs --tail=10 joti-sim 2>/dev/null | tail -5
+        docker compose logs --tail=10 purplelab 2>/dev/null | tail -5
 
         warn "Restarting backend..."
-        docker compose restart joti-sim 2>/dev/null
+        docker compose restart purplelab 2>/dev/null
         if wait_for "Backend API" "curl -sf http://localhost:4000/api/catalog"; then
             fixed=$((fixed + 1))
         else
-            fail "Backend API recovery failed. Check: ./joti.sh logs joti-sim"
+            fail "Backend API recovery failed. Check: ./purplelab.sh logs purplelab"
             failed=$((failed + 1))
         fi
     else
@@ -622,7 +622,7 @@ cmd_heal() {
     if [ $failed -eq 0 ]; then
         ok "System healthy"
     else
-        warn "Run './joti.sh logs' to investigate remaining issues"
+        warn "Run './purplelab.sh logs' to investigate remaining issues"
     fi
 }
 
@@ -645,7 +645,7 @@ cmd_reset_password() {
             read -rsp "  New PostgreSQL password (leave empty for random): " new_pass
             echo ""
             if [ -z "$new_pass" ]; then
-                new_pass=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 24 || echo "jotisim_$(date +%s)")
+                new_pass=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 24 || echo "purplelab_$(date +%s)")
                 info "Generated password: $new_pass"
             fi
 
@@ -657,12 +657,12 @@ cmd_reset_password() {
             fi
 
             # Update PostgreSQL password inside running container
-            docker compose exec -T postgres psql -U jotisim -c "ALTER USER jotisim WITH PASSWORD '${new_pass}';" 2>/dev/null && \
+            docker compose exec -T postgres psql -U purplelab -c "ALTER USER purplelab WITH PASSWORD '${new_pass}';" 2>/dev/null && \
                 ok "PostgreSQL password updated in database" || \
                 warn "Could not update live database. Password will take effect on next restart."
 
             ok "PostgreSQL password updated in .env"
-            warn "Restart services for changes to take full effect: ./joti.sh restart"
+            warn "Restart services for changes to take full effect: ./purplelab.sh restart"
             ;;&  # Fall through for choice 3
 
         2|3)
@@ -680,7 +680,7 @@ cmd_reset_password() {
 
             ok "Encryption key rotated"
             warn "Any existing encrypted SIEM credentials will need to be re-entered"
-            warn "Restart services: ./joti.sh restart"
+            warn "Restart services: ./purplelab.sh restart"
             ;;
 
         *)
@@ -713,7 +713,7 @@ cmd_reset_all() {
     rm -f "$ENV_FILE" "$LOG_FILE" 2>/dev/null || true
 
     ok "Everything destroyed."
-    info "Run './joti.sh' to rebuild from scratch."
+    info "Run './purplelab.sh' to rebuild from scratch."
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -732,12 +732,12 @@ cmd_logs() {
 # Shell access
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd_shell() {
-    local svc="${1:-joti-sim}"
+    local svc="${1:-purplelab}"
     docker compose exec "$svc" /bin/bash 2>/dev/null || docker compose exec "$svc" /bin/sh
 }
 
 cmd_db_shell() {
-    docker compose exec postgres psql -U jotisim
+    docker compose exec postgres psql -U purplelab
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -807,14 +807,14 @@ cmd_frontend() {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd_test() {
     step "Running Tests"
-    docker compose exec -T joti-sim python -m pytest tests/ -v --tb=short 2>&1
+    docker compose exec -T purplelab python -m pytest tests/ -v --tb=short 2>&1
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Update (git pull + rebuild)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd_update() {
-    step "Updating Joti Sim"
+    step "Updating PurpleLab"
 
     if command -v git &>/dev/null && [ -d .git ]; then
         info "Pulling latest code..."
@@ -839,15 +839,15 @@ cmd_update() {
 cmd_backup() {
     step "Database Backup"
     mkdir -p "$BACKUP_DIR"
-    local filename="${BACKUP_DIR}/jotisim_$(date +%Y%m%d_%H%M%S).sql.gz"
-    docker compose exec -T postgres pg_dump -U jotisim jotisim | gzip > "$filename"
+    local filename="${BACKUP_DIR}/purplelab_$(date +%Y%m%d_%H%M%S).sql.gz"
+    docker compose exec -T postgres pg_dump -U purplelab purplelab | gzip > "$filename"
     ok "Backup saved to $filename ($(du -sh "$filename" | awk '{print $1}'))"
 }
 
 cmd_restore() {
     local file="${1:-}"
     if [ -z "$file" ]; then
-        fail "Usage: ./joti.sh restore <backup_file.sql.gz>"
+        fail "Usage: ./purplelab.sh restore <backup_file.sql.gz>"
         info "Available backups:"
         ls -la "$BACKUP_DIR"/*.sql.gz 2>/dev/null || info "  No backups found"
         return 1
@@ -867,7 +867,7 @@ cmd_restore() {
     fi
 
     info "Restoring from $file..."
-    gunzip -c "$file" | docker compose exec -T postgres psql -U jotisim -d jotisim 2>/dev/null
+    gunzip -c "$file" | docker compose exec -T postgres psql -U purplelab -d purplelab 2>/dev/null
     ok "Database restored from $file"
 }
 
@@ -877,26 +877,26 @@ cmd_restore() {
 cmd_help() {
     banner
     printf "  ${W}Commands:${N}\n\n"
-    printf "    ${C}./joti.sh${N}                    First-time setup (installs Docker if needed)\n"
-    printf "    ${C}./joti.sh up${N}                 Start all services\n"
-    printf "    ${C}./joti.sh down${N}               Stop all services\n"
-    printf "    ${C}./joti.sh restart${N}            Restart everything\n"
-    printf "    ${C}./joti.sh build${N}              Rebuild Docker images\n"
-    printf "    ${C}./joti.sh status${N}             Health check all services\n"
-    printf "    ${C}./joti.sh heal${N}               Auto-diagnose and fix problems\n"
-    printf "    ${C}./joti.sh logs [service]${N}     Tail logs\n"
-    printf "    ${C}./joti.sh test${N}               Run test suite\n"
-    printf "    ${C}./joti.sh migrate${N}            Run database migrations\n"
-    printf "    ${C}./joti.sh seed${N}               Load MITRE ATT&CK data\n"
-    printf "    ${C}./joti.sh frontend${N}           Install + start Next.js frontend\n"
-    printf "    ${C}./joti.sh reset-password${N}     Reset PostgreSQL/encryption passwords\n"
-    printf "    ${C}./joti.sh reset-all${N}          Nuclear: destroy everything\n"
-    printf "    ${C}./joti.sh shell [service]${N}    Shell into container\n"
-    printf "    ${C}./joti.sh db-shell${N}           Open psql shell\n"
-    printf "    ${C}./joti.sh update${N}             Git pull + rebuild + restart\n"
-    printf "    ${C}./joti.sh backup${N}             Backup database\n"
-    printf "    ${C}./joti.sh restore <file>${N}     Restore database from backup\n"
-    printf "    ${C}./joti.sh help${N}               Show this help\n"
+    printf "    ${C}./purplelab.sh${N}                    First-time setup (installs Docker if needed)\n"
+    printf "    ${C}./purplelab.sh up${N}                 Start all services\n"
+    printf "    ${C}./purplelab.sh down${N}               Stop all services\n"
+    printf "    ${C}./purplelab.sh restart${N}            Restart everything\n"
+    printf "    ${C}./purplelab.sh build${N}              Rebuild Docker images\n"
+    printf "    ${C}./purplelab.sh status${N}             Health check all services\n"
+    printf "    ${C}./purplelab.sh heal${N}               Auto-diagnose and fix problems\n"
+    printf "    ${C}./purplelab.sh logs [service]${N}     Tail logs\n"
+    printf "    ${C}./purplelab.sh test${N}               Run test suite\n"
+    printf "    ${C}./purplelab.sh migrate${N}            Run database migrations\n"
+    printf "    ${C}./purplelab.sh seed${N}               Load MITRE ATT&CK data\n"
+    printf "    ${C}./purplelab.sh frontend${N}           Install + start Next.js frontend\n"
+    printf "    ${C}./purplelab.sh reset-password${N}     Reset PostgreSQL/encryption passwords\n"
+    printf "    ${C}./purplelab.sh reset-all${N}          Nuclear: destroy everything\n"
+    printf "    ${C}./purplelab.sh shell [service]${N}    Shell into container\n"
+    printf "    ${C}./purplelab.sh db-shell${N}           Open psql shell\n"
+    printf "    ${C}./purplelab.sh update${N}             Git pull + rebuild + restart\n"
+    printf "    ${C}./purplelab.sh backup${N}             Backup database\n"
+    printf "    ${C}./purplelab.sh restore <file>${N}     Restore database from backup\n"
+    printf "    ${C}./purplelab.sh help${N}               Show this help\n"
     echo ""
 }
 
@@ -919,7 +919,7 @@ cmd_setup() {
 
     echo ""
     printf "  ${G}${W}╔═══════════════════════════════════════════════════════════╗${N}\n"
-    printf "  ${G}${W}║              JOTI SIM v2 — READY                          ║${N}\n"
+    printf "  ${G}${W}║              PURPLELAB v2 — READY                          ║${N}\n"
     printf "  ${G}${W}╠═══════════════════════════════════════════════════════════╣${N}\n"
     printf "  ${G}${W}║                                                           ║${N}\n"
     printf "  ${G}${W}║  Backend API:     http://localhost:4000                    ║${N}\n"
@@ -929,12 +929,12 @@ cmd_setup() {
     printf "  ${G}${W}║  Redis:           localhost:${REDIS_PORT:-6380}                          ║${N}\n"
     printf "  ${G}${W}║                                                           ║${N}\n"
     printf "  ${G}${W}║  Quick Start:                                             ║${N}\n"
-    printf "  ${G}${W}║    ./joti.sh status          Check everything works       ║${N}\n"
-    printf "  ${G}${W}║    ./joti.sh heal            Fix if something breaks      ║${N}\n"
-    printf "  ${G}${W}║    ./joti.sh frontend        Start Next.js UI             ║${N}\n"
-    printf "  ${G}${W}║    ./joti.sh seed            Load MITRE ATT&CK data       ║${N}\n"
-    printf "  ${G}${W}║    ./joti.sh reset-password  Change passwords             ║${N}\n"
-    printf "  ${G}${W}║    ./joti.sh help            Show all commands             ║${N}\n"
+    printf "  ${G}${W}║    ./purplelab.sh status          Check everything works       ║${N}\n"
+    printf "  ${G}${W}║    ./purplelab.sh heal            Fix if something breaks      ║${N}\n"
+    printf "  ${G}${W}║    ./purplelab.sh frontend        Start Next.js UI             ║${N}\n"
+    printf "  ${G}${W}║    ./purplelab.sh seed            Load MITRE ATT&CK data       ║${N}\n"
+    printf "  ${G}${W}║    ./purplelab.sh reset-password  Change passwords             ║${N}\n"
+    printf "  ${G}${W}║    ./purplelab.sh help            Show all commands             ║${N}\n"
     printf "  ${G}${W}║                                                           ║${N}\n"
     printf "  ${G}${W}╚═══════════════════════════════════════════════════════════╝${N}\n"
     echo ""

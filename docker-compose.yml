@@ -1,14 +1,14 @@
 version: "3.9"
 
 services:
-  joti-sim:
+  purplelab:
     build: .
-    container_name: joti-sim-api
+    container_name: purplelab-api
     ports:
       - "4000:4000"
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql+asyncpg://jotisim:${POSTGRES_PASSWORD:-jotisim}@postgres:5432/jotisim
+      - DATABASE_URL=postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
@@ -45,17 +45,17 @@ services:
 
   postgres:
     image: postgres:17-alpine
-    container_name: joti-sim-db
+    container_name: purplelab-db
     environment:
-      POSTGRES_USER: jotisim
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jotisim}
-      POSTGRES_DB: jotisim
+      POSTGRES_USER: purplelab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-purplelab}
+      POSTGRES_DB: purplelab
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jotisim"]
+      test: ["CMD-SHELL", "pg_isready -U purplelab"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -63,7 +63,7 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    container_name: joti-sim-redis
+    container_name: purplelab-redis
     ports:
       - "${REDIS_PORT:-6380}:6379"
     volumes:

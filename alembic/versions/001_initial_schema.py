@@ -1,4 +1,4 @@
-"""Initial schema — all tables for Joti Sim v2.
+"""Initial schema — all tables for PurpleLab v2.
 
 Revision ID: 001
 Revises: None

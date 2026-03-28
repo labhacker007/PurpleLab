@@ -3,7 +3,7 @@ import "./globals.css"
 import { Sidebar } from "@/components/sidebar"
 
 export const metadata: Metadata = {
-  title: "Joti Sim",
+  title: "PurpleLab",
   description: "Universal Security Product Simulator",
 }
 
@@ -30,7 +30,7 @@ export default function RootLayout({
 function Header() {
   return (
     <header className="h-14 shrink-0 border-b border-border bg-card flex items-center px-6">
-      <h1 className="text-sm font-semibold text-text">Joti Sim</h1>
+      <h1 className="text-sm font-semibold text-text">PurpleLab</h1>
       <span className="ml-2 text-xs text-muted">v2.0</span>
       <div className="flex-1" />
       <div className="flex items-center gap-3">

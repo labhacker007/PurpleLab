@@ -1,1 +1,1 @@
-# Joti Sim test suite
+# PurpleLab test suite
