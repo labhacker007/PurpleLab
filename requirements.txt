@@ -1,7 +1,39 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-httpx==0.28.1
-apscheduler==3.11.0
-pydantic==2.10.4
-python-dateutil==2.9.0
-faker==33.3.1
+# Existing
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+httpx>=0.28.0
+apscheduler>=3.11.0
+pydantic>=2.10.0
+python-dateutil>=2.9.0
+faker>=33.0.0
+
+# New - Database
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# New - Settings
+pydantic-settings>=2.7.0
+
+# New - Cache & Queue
+redis>=5.2.0
+celery>=5.4.0
+
+# New - AI/LLM
+anthropic>=0.45.0
+openai>=1.60.0
+
+# New - Vector DB
+chromadb>=0.6.0
+
+# New - Threat Intel
+mitreattack-python>=4.0.0
+pysigma>=0.11.0
+beautifulsoup4>=4.12.0
+
+# New - Security
+cryptography>=44.0.0
+
+# New - WebSocket
+websockets>=14.0
+python-socketio>=5.11.0

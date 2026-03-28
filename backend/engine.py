@@ -6,10 +6,12 @@ to a target platform. Sessions can be started, stopped, paused, and monitored.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,6 +20,62 @@ from pydantic import BaseModel, Field
 from backend.generators.base import BaseGenerator, GeneratorConfig
 
 log = logging.getLogger(__name__)
+
+# ── URL Validation (SSRF protection) ────────────────────────────────────────
+
+# Private / internal IP ranges that must never be targeted
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local + cloud metadata
+    ipaddress.ip_network("fd00::/8"),
+    ipaddress.ip_network("::1/128"),
+]
+
+# Configurable allowlist — URLs matching these prefixes bypass the block check.
+# Populate via ALLOWED_TARGET_PREFIXES env / config, e.g. ["http://localhost:8000"]
+ALLOWED_TARGET_PREFIXES: list[str] = []
+
+
+def _is_blocked_host(hostname: str) -> bool:
+    """Return True if *hostname* resolves to a private/internal IP range."""
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # Not a bare IP — conservatively allow DNS names (they'll be resolved
+        # by httpx).  Cloud metadata IPs are already caught by 169.254.0.0/16.
+        return False
+    for net in _BLOCKED_NETWORKS:
+        if addr in net:
+            return True
+    return False
+
+
+def validate_target_url(url: str | None) -> str | None:
+    """Validate a target URL and return it, or raise ValueError."""
+    if not url:
+        return None
+    if url.startswith("preview://"):
+        return url  # internal sentinel, never actually fetched
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
+    if not parsed.hostname:
+        raise ValueError("URL has no hostname")
+
+    # Allow-list bypass
+    for prefix in ALLOWED_TARGET_PREFIXES:
+        if url.startswith(prefix):
+            return url
+
+    if _is_blocked_host(parsed.hostname):
+        raise ValueError(
+            f"Target URL points to a blocked internal address: {parsed.hostname}"
+        )
+    return url
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -78,6 +136,7 @@ class SimulationEngine:
         self.event_log: list[EventLog] = []  # Last N events for UI
         self.stats: dict[str, dict] = {}  # session_id → {events_sent, errors, etc.}
         self._http = httpx.AsyncClient(timeout=10.0)
+        self._update_locks: dict[str, asyncio.Lock] = {}  # Fix 4: per-session locks
 
     # ── Session CRUD ──────────────────────────────────────────────────────
 
@@ -85,6 +144,7 @@ class SimulationEngine:
         self.sessions[config.session_id] = config
         self.running[config.session_id] = False
         self.stats[config.session_id] = {"events_sent": 0, "errors": 0, "last_event_at": None}
+        self._update_locks[config.session_id] = asyncio.Lock()
         return config
 
     def get_session(self, session_id: str) -> Optional[SessionConfig]:
@@ -103,16 +163,21 @@ class SimulationEngine:
             for s in self.sessions.values()
         ]
 
-    def update_session(self, session_id: str, config: SessionConfig) -> Optional[SessionConfig]:
+    async def update_session(self, session_id: str, config: SessionConfig) -> Optional[SessionConfig]:
         if session_id not in self.sessions:
             return None
-        was_running = self.running.get(session_id, False)
-        if was_running:
-            self.stop_session(session_id)
-        config.session_id = session_id
-        self.sessions[session_id] = config
-        if was_running:
-            self.start_session(session_id)
+        lock = self._update_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._update_locks[session_id] = lock
+        async with lock:
+            was_running = self.running.get(session_id, False)
+            if was_running:
+                self.stop_session(session_id)
+            config.session_id = session_id
+            self.sessions[session_id] = config
+            if was_running:
+                self.start_session(session_id)
         return config
 
     def delete_session(self, session_id: str) -> bool:
@@ -121,6 +186,7 @@ class SimulationEngine:
         self.sessions.pop(session_id, None)
         self.running.pop(session_id, None)
         self.stats.pop(session_id, None)
+        self._update_locks.pop(session_id, None)
         return True
 
     # ── Start / Stop ──────────────────────────────────────────────────────
@@ -193,6 +259,19 @@ class SimulationEngine:
             token = product.config.webhook_token or "sim-token"
             target_url = f"{t.base_url}{t.webhook_path.replace('{token}', token)}"
 
+        # Fix 1: SSRF — validate the target URL before dispatching
+        try:
+            target_url = validate_target_url(target_url)
+        except ValueError as e:
+            log.warning("blocked_target session=%s product=%s reason=%s", session_id, product.id, e)
+            stats = self.stats.get(session_id)
+            if stats is not None:
+                stats["errors"] = stats.get("errors", 0) + 1
+            return
+
+        if not target_url:
+            return
+
         status_code = 0
         success = False
         try:
@@ -201,10 +280,16 @@ class SimulationEngine:
             success = 200 <= resp.status_code < 300
         except Exception as e:
             log.debug("send_failed session=%s product=%s error=%s", session_id, product.id, e)
-            self.stats[session_id]["errors"] = self.stats.get(session_id, {}).get("errors", 0) + 1
+            # Fix 5: guard against missing session_id key
+            stats = self.stats.get(session_id)
+            if stats is not None:
+                stats["errors"] = stats.get("errors", 0) + 1
 
-        self.stats[session_id]["events_sent"] = self.stats.get(session_id, {}).get("events_sent", 0) + 1
-        self.stats[session_id]["last_event_at"] = self._now_iso()
+        # Fix 5: guard against missing session_id key
+        stats = self.stats.get(session_id)
+        if stats is not None:
+            stats["events_sent"] = stats.get("events_sent", 0) + 1
+            stats["last_event_at"] = self._now_iso()
 
         log_entry = EventLog(
             timestamp=self._now_iso(),

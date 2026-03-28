@@ -1,0 +1,1 @@
+"""SIEM platform connectors."""

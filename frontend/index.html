@@ -149,23 +149,39 @@ async function loadCatalog() {
 
 function renderCatalog() {
   const el = document.getElementById('catalog');
+  el.innerHTML = '';
   const categories = {};
   catalog.forEach(p => {
     if (!categories[p.category]) categories[p.category] = [];
     categories[p.category].push(p);
   });
   const catLabels = { siem: 'SIEM', edr: 'EDR', itdr: 'Identity', email: 'Email Security', itsm: 'ITSM', cloud: 'Cloud Security' };
-  let html = '';
   for (const [cat, products] of Object.entries(categories)) {
-    html += `<h3>${catLabels[cat] || cat}</h3>`;
+    const h3 = document.createElement('h3');
+    h3.textContent = catLabels[cat] || cat;
+    el.appendChild(h3);
     products.forEach(p => {
-      html += `<div class="product-card" draggable="true" ondragstart="event.dataTransfer.setData('product', '${p.id}')">
-        <div class="dot" style="background:${p.color}"></div>
-        <div><div class="name">${p.name}</div><div class="desc">${p.description}</div></div>
-      </div>`;
+      const card = document.createElement('div');
+      card.className = 'product-card';
+      card.draggable = true;
+      card.addEventListener('dragstart', (ev) => ev.dataTransfer.setData('product', p.id));
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      dot.style.background = p.color;
+      const info = document.createElement('div');
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'name';
+      nameDiv.textContent = p.name;
+      const descDiv = document.createElement('div');
+      descDiv.className = 'desc';
+      descDiv.textContent = p.description;
+      info.appendChild(nameDiv);
+      info.appendChild(descDiv);
+      card.appendChild(dot);
+      card.appendChild(info);
+      el.appendChild(card);
     });
   }
-  el.innerHTML = html;
 }
 
 // ── Canvas ───────────────────────────────────────────────────────
@@ -334,17 +350,49 @@ async function pollEvents() {
   } catch {}
 }
 
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 function renderEventLog(events) {
   const el = document.getElementById('eventLog');
   if (!events || events.length === 0) return;
-  el.innerHTML = events.reverse().map(e => `
-    <div class="log-entry">
-      <div class="log-time">${new Date(e.timestamp).toLocaleTimeString()}</div>
-      <div><span class="log-product">${e.product_label}</span> <span class="sev-${e.severity}">${e.severity}</span></div>
-      <div class="log-title">${e.title}</div>
-      <div class="log-status ${e.success ? 'success' : 'error'}">${e.success ? '✓ ' + e.status_code : '✗ ' + (e.status_code || 'connection failed')}</div>
-    </div>
-  `).join('');
+  el.innerHTML = '';
+  events.reverse().forEach(e => {
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+
+    const time = document.createElement('div');
+    time.className = 'log-time';
+    time.textContent = new Date(e.timestamp).toLocaleTimeString();
+
+    const meta = document.createElement('div');
+    const prodSpan = document.createElement('span');
+    prodSpan.className = 'log-product';
+    prodSpan.textContent = e.product_label;
+    const sevSpan = document.createElement('span');
+    const safeSev = escapeHtml(String(e.severity));
+    sevSpan.className = 'sev-' + safeSev;
+    sevSpan.textContent = ' ' + e.severity;
+    meta.appendChild(prodSpan);
+    meta.appendChild(sevSpan);
+
+    const title = document.createElement('div');
+    title.className = 'log-title';
+    title.textContent = e.title;
+
+    const status = document.createElement('div');
+    status.className = 'log-status ' + (e.success ? 'success' : 'error');
+    status.textContent = e.success ? '\u2713 ' + e.status_code : '\u2717 ' + (e.status_code || 'connection failed');
+
+    entry.appendChild(time);
+    entry.appendChild(meta);
+    entry.appendChild(title);
+    entry.appendChild(status);
+    el.appendChild(entry);
+  });
 }
 
 // ── Init ─────────────────────────────────────────────────────────
