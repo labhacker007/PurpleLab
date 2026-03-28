@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-28
 **Last commit:** `b8c69ed rebrand: rename from "Joti Sim" to "PurpleLab"`
-**Remote:** github.com/labhacker007/joti-simulator
+**Remote:** github.com/labhacker007/PurpleLab
 **Branch:** main
 
 ---
