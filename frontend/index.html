@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joti Sim — Security Lab Builder</title>
+  <style>
+    :root {
+      --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #e4e4e7;
+      --muted: #71717a; --primary: #6366f1; --primary-hover: #818cf8;
+      --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #3b82f6;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+
+    .app { display: grid; grid-template-columns: 260px 1fr 320px; height: 100vh; }
+
+    /* Sidebar */
+    .sidebar { background: var(--card); border-right: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+    .sidebar h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--primary); }
+    .sidebar h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 16px 0 8px; }
+
+    .product-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+      margin-bottom: 8px; cursor: grab; transition: all 0.15s;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .product-card:hover { border-color: var(--primary); transform: translateX(2px); }
+    .product-card:active { cursor: grabbing; }
+    .product-card .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .product-card .name { font-size: 12px; font-weight: 500; }
+    .product-card .desc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    /* Canvas */
+    .canvas-area { position: relative; overflow: hidden; background: var(--bg);
+      background-image: radial-gradient(circle, #2a2d3a 1px, transparent 1px);
+      background-size: 20px 20px; }
+
+    .canvas-node {
+      position: absolute; background: var(--card); border: 2px solid var(--border);
+      border-radius: 12px; padding: 12px 16px; min-width: 160px;
+      cursor: move; user-select: none; z-index: 10; transition: box-shadow 0.15s;
+    }
+    .canvas-node:hover { box-shadow: 0 0 20px rgba(99, 102, 241, 0.2); }
+    .canvas-node.running { border-color: var(--green); }
+    .canvas-node.target-node { border-color: var(--primary); border-style: dashed; }
+    .canvas-node .node-label { font-size: 13px; font-weight: 600; }
+    .canvas-node .node-type { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+    .canvas-node .node-stats { font-size: 10px; color: var(--green); margin-top: 4px; }
+    .canvas-node .remove-btn {
+      position: absolute; top: -8px; right: -8px; width: 20px; height: 20px;
+      background: var(--red); border-radius: 50%; border: none; color: white;
+      font-size: 11px; cursor: pointer; display: none; align-items: center; justify-content: center;
+    }
+    .canvas-node:hover .remove-btn { display: flex; }
+
+    .canvas-toolbar {
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 20;
+    }
+    .canvas-toolbar button {
+      background: var(--card); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500;
+      transition: all 0.15s;
+    }
+    .canvas-toolbar button:hover { border-color: var(--primary); }
+    .canvas-toolbar .btn-start { background: var(--green); border-color: var(--green); color: #000; font-weight: 700; }
+    .canvas-toolbar .btn-stop { background: var(--red); border-color: var(--red); color: #fff; font-weight: 700; }
+
+    /* Event Log Panel */
+    .log-panel { background: var(--card); border-left: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+    .log-panel h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+    .log-entry {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px; margin-bottom: 6px; font-size: 11px;
+    }
+    .log-entry .log-time { color: var(--muted); font-family: monospace; font-size: 10px; }
+    .log-entry .log-product { font-weight: 600; }
+    .log-entry .log-title { color: var(--text); margin-top: 2px; }
+    .log-entry .log-status { font-size: 10px; margin-top: 2px; }
+    .log-entry .log-status.success { color: var(--green); }
+    .log-entry .log-status.error { color: var(--red); }
+
+    .sev-critical { color: var(--red); } .sev-high { color: #f97316; }
+    .sev-medium { color: var(--amber); } .sev-low { color: var(--blue); }
+
+    /* Session name input */
+    .session-name {
+      background: transparent; border: none; border-bottom: 1px solid var(--border);
+      color: var(--text); font-size: 16px; font-weight: 600; width: 100%;
+      padding: 4px 0; margin-bottom: 8px; outline: none;
+    }
+    .session-name:focus { border-color: var(--primary); }
+
+    /* Connection lines (SVG) */
+    .connections-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+    .connection-line { stroke: var(--primary); stroke-width: 2; fill: none; stroke-dasharray: 8 4; opacity: 0.6; }
+    .connection-line.active { stroke: var(--green); stroke-dasharray: none; opacity: 0.8; animation: flow 1s linear infinite; }
+    @keyframes flow { to { stroke-dashoffset: -12; } }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar: Product Catalog -->
+  <div class="sidebar">
+    <h2>Security Products</h2>
+    <p style="font-size:10px;color:var(--muted);margin-bottom:12px">Drag products onto the canvas to build your simulation</p>
+    <div id="catalog"></div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-area" id="canvas"
+       ondragover="event.preventDefault()" ondrop="handleCanvasDrop(event)">
+    <svg class="connections-svg" id="connections"></svg>
+    <div class="canvas-toolbar">
+      <input class="session-name" id="sessionName" value="My Security Lab" placeholder="Session name...">
+      <button class="btn-start" id="btnStart" onclick="startSession()">Start</button>
+      <button class="btn-stop" id="btnStop" onclick="stopSession()" style="display:none">Stop</button>
+      <button onclick="addTarget()">+ Target</button>
+      <button onclick="clearCanvas()">Clear</button>
+    </div>
+    <div id="canvasNodes"></div>
+  </div>
+
+  <!-- Event Log -->
+  <div class="log-panel">
+    <h2>Live Event Log</h2>
+    <div id="eventLog"><p style="font-size:11px;color:var(--muted)">Events will appear here when simulation runs...</p></div>
+  </div>
+</div>
+
+<script>
+const API = '';  // Same origin
+let catalog = [];
+let nodes = [];
+let sessionId = null;
+let running = false;
+let pollInterval = null;
+let dragNodeId = null;
+let dragOffset = { x: 0, y: 0 };
+
+// ── Load catalog ─────────────────────────────────────────────────
+async function loadCatalog() {
+  const res = await fetch(`${API}/api/catalog`);
+  const data = await res.json();
+  catalog = data.products;
+  renderCatalog();
+}
+
+function renderCatalog() {
+  const el = document.getElementById('catalog');
+  const categories = {};
+  catalog.forEach(p => {
+    if (!categories[p.category]) categories[p.category] = [];
+    categories[p.category].push(p);
+  });
+  const catLabels = { siem: 'SIEM', edr: 'EDR', itdr: 'Identity', email: 'Email Security', itsm: 'ITSM', cloud: 'Cloud Security' };
+  let html = '';
+  for (const [cat, products] of Object.entries(categories)) {
+    html += `<h3>${catLabels[cat] || cat}</h3>`;
+    products.forEach(p => {
+      html += `<div class="product-card" draggable="true" ondragstart="event.dataTransfer.setData('product', '${p.id}')">
+        <div class="dot" style="background:${p.color}"></div>
+        <div><div class="name">${p.name}</div><div class="desc">${p.description}</div></div>
+      </div>`;
+    });
+  }
+  el.innerHTML = html;
+}
+
+// ── Canvas ───────────────────────────────────────────────────────
+function handleCanvasDrop(e) {
+  e.preventDefault();
+  const productId = e.dataTransfer.getData('product');
+  if (!productId) return;
+  const product = catalog.find(p => p.id === productId);
+  if (!product) return;
+
+  const rect = document.getElementById('canvas').getBoundingClientRect();
+  const x = e.clientX - rect.left - 80;
+  const y = e.clientY - rect.top - 30;
+
+  const node = {
+    id: Math.random().toString(36).slice(2, 10),
+    type: 'product',
+    product_type: product.id,
+    label: product.name,
+    color: product.color,
+    x, y,
+    config: { product_type: product.id, target_url: '', webhook_token: 'sim-' + product.id, events_per_minute: 2, severity_weights: { critical: 0.05, high: 0.2, medium: 0.5, low: 0.25 }, enabled: true, custom_config: {} },
+    connected_to: null,
+  };
+
+  // Auto-connect to first target
+  const target = nodes.find(n => n.type === 'target');
+  if (target) node.connected_to = target.id;
+
+  nodes.push(node);
+  renderCanvas();
+}
+
+function addTarget() {
+  const node = {
+    id: Math.random().toString(36).slice(2, 10),
+    type: 'target',
+    label: 'Joti Platform',
+    base_url: 'http://localhost:8000',
+    webhook_path: '/api/alerts/ingest/{token}',
+    x: 500, y: 250,
+  };
+  nodes.push(node);
+  renderCanvas();
+}
+
+function renderCanvas() {
+  const container = document.getElementById('canvasNodes');
+  container.innerHTML = '';
+  nodes.forEach(node => {
+    const div = document.createElement('div');
+    div.className = `canvas-node ${node.type === 'target' ? 'target-node' : ''} ${running ? 'running' : ''}`;
+    div.style.left = node.x + 'px';
+    div.style.top = node.y + 'px';
+    if (node.color) div.style.borderColor = node.color;
+
+    div.innerHTML = `
+      <div class="node-type">${node.type === 'target' ? 'TARGET' : node.product_type}</div>
+      <div class="node-label">${node.label}</div>
+      ${node.type === 'product' ? `<div class="node-stats" id="stats-${node.id}"></div>` : `<div style="font-size:10px;color:var(--muted);margin-top:4px">${node.base_url || ''}</div>`}
+      <button class="remove-btn" onclick="removeNode('${node.id}')">&times;</button>
+    `;
+
+    // Draggable
+    div.addEventListener('mousedown', (e) => {
+      if (e.target.classList.contains('remove-btn')) return;
+      dragNodeId = node.id;
+      dragOffset = { x: e.clientX - node.x, y: e.clientY - node.y };
+      e.preventDefault();
+    });
+
+    container.appendChild(div);
+  });
+  renderConnections();
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (!dragNodeId) return;
+  const node = nodes.find(n => n.id === dragNodeId);
+  if (!node) return;
+  node.x = e.clientX - dragOffset.x;
+  node.y = e.clientY - dragOffset.y;
+  renderCanvas();
+});
+document.addEventListener('mouseup', () => { dragNodeId = null; });
+
+function removeNode(id) {
+  nodes = nodes.filter(n => n.id !== id);
+  nodes.forEach(n => { if (n.connected_to === id) n.connected_to = null; });
+  renderCanvas();
+}
+
+function clearCanvas() {
+  if (running) stopSession();
+  nodes = [];
+  renderCanvas();
+}
+
+function renderConnections() {
+  const svg = document.getElementById('connections');
+  let lines = '';
+  nodes.forEach(node => {
+    if (node.connected_to) {
+      const target = nodes.find(n => n.id === node.connected_to);
+      if (target) {
+        const x1 = node.x + 80, y1 = node.y + 30;
+        const x2 = target.x + 80, y2 = target.y + 30;
+        const mx = (x1 + x2) / 2;
+        lines += `<path class="connection-line ${running ? 'active' : ''}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" />`;
+      }
+    }
+  });
+  svg.innerHTML = lines;
+}
+
+// ── Session Management ───────────────────────────────────────────
+async function startSession() {
+  const name = document.getElementById('sessionName').value || 'My Lab';
+  const products = nodes.filter(n => n.type === 'product').map(n => ({
+    id: n.id, product_type: n.product_type, label: n.label, x: n.x, y: n.y,
+    config: n.config, connected_to: n.connected_to,
+  }));
+  const targets = nodes.filter(n => n.type === 'target').map(n => ({
+    id: n.id, label: n.label, base_url: n.base_url, webhook_path: n.webhook_path, x: n.x, y: n.y,
+  }));
+
+  if (products.length === 0) { alert('Add at least one product to the canvas'); return; }
+  if (targets.length === 0) { alert('Add a target platform (click "+ Target")'); return; }
+
+  // Create session
+  const res = await fetch(`${API}/api/sessions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, products, targets }),
+  });
+  const session = await res.json();
+  sessionId = session.session_id;
+
+  // Start it
+  await fetch(`${API}/api/sessions/${sessionId}/start`, { method: 'POST' });
+  running = true;
+  document.getElementById('btnStart').style.display = 'none';
+  document.getElementById('btnStop').style.display = 'inline-block';
+  renderCanvas();
+
+  // Poll events
+  pollInterval = setInterval(pollEvents, 2000);
+}
+
+async function stopSession() {
+  if (sessionId) {
+    await fetch(`${API}/api/sessions/${sessionId}/stop`, { method: 'POST' });
+  }
+  running = false;
+  document.getElementById('btnStart').style.display = 'inline-block';
+  document.getElementById('btnStop').style.display = 'none';
+  if (pollInterval) clearInterval(pollInterval);
+  renderCanvas();
+}
+
+async function pollEvents() {
+  if (!sessionId) return;
+  try {
+    const res = await fetch(`${API}/api/sessions/${sessionId}/events?limit=30`);
+    const data = await res.json();
+    renderEventLog(data.events);
+  } catch {}
+}
+
+function renderEventLog(events) {
+  const el = document.getElementById('eventLog');
+  if (!events || events.length === 0) return;
+  el.innerHTML = events.reverse().map(e => `
+    <div class="log-entry">
+      <div class="log-time">${new Date(e.timestamp).toLocaleTimeString()}</div>
+      <div><span class="log-product">${e.product_label}</span> <span class="sev-${e.severity}">${e.severity}</span></div>
+      <div class="log-title">${e.title}</div>
+      <div class="log-status ${e.success ? 'success' : 'error'}">${e.success ? '✓ ' + e.status_code : '✗ ' + (e.status_code || 'connection failed')}</div>
+    </div>
+  `).join('');
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+loadCatalog();
+// Auto-add Joti target
+addTarget();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  joti-sim:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+    command: python -m uvicorn backend.main:app --host 0.0.0.0 --port 4000 --reload
+    # Connect to Joti's network so webhooks reach localhost:8000
+    networks:
+      - default
+      - joti_default
+
+networks:
+  joti_default:
+    external: true
