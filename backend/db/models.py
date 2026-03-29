@@ -220,6 +220,7 @@ class SimulationSession(Base):
     events_sent: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[int] = mapped_column(Integer, default=0)
     last_event_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
 

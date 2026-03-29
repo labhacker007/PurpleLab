@@ -18,6 +18,7 @@ from backend.detection.parsers.esql_parser import ESQLParser
 from backend.detection.parsers.kql_parser import KQLParser
 from backend.detection.parsers.sigma_parser import SigmaParser
 from backend.detection.parsers.spl_parser import SPLParser
+from backend.detection.parsers.yara_l_parser import YARALParser
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class RuleManager:
             "spl": SPLParser(),
             "kql": KQLParser(),
             "esql": ESQLParser(),
+            "yara_l": YARALParser(),
         }
         self.evaluator = RuleEvaluator(field_mapping=field_mapping)
         self.coverage_analyzer = CoverageAnalyzer()

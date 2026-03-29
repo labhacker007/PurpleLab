@@ -761,7 +761,7 @@ export default function ThreatIntelPage() {
           {/* Left panel — actor list */}
           <div className="w-72 shrink-0 flex flex-col border-r border-slate-800 overflow-hidden">
             {/* Search */}
-            <div className="px-3 py-3 border-b border-slate-800">
+            <div className="px-3 py-3 border-b border-slate-800 space-y-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
                 <input
@@ -771,15 +771,37 @@ export default function ThreatIntelPage() {
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500"
                 />
               </div>
+              <button
+                onClick={() => void loadActors()}
+                disabled={loading}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
+                Refresh
+              </button>
             </div>
 
             {/* Actor cards */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {loading ? (
-                <div className="flex items-center justify-center py-12 gap-2 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading actors…
-                </div>
+                <>
+                  {[1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-3 space-y-2 animate-pulse"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-20 bg-slate-800 rounded" />
+                        <div className="h-4 w-10 bg-slate-800 rounded" />
+                      </div>
+                      <div className="h-3 w-32 bg-slate-800 rounded" />
+                      <div className="flex gap-1 mt-1">
+                        <div className="h-4 w-16 bg-slate-800 rounded" />
+                        <div className="h-4 w-16 bg-slate-800 rounded" />
+                      </div>
+                    </div>
+                  ))}
+                </>
               ) : filtered.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-2 text-sm text-slate-500">
                   <Shield className="h-8 w-8 text-slate-700" />

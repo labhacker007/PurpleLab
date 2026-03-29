@@ -27,29 +27,34 @@ async def get_settings() -> Settings:
 
 
 # ---------------------------------------------------------------------------
-# Database (placeholder — not yet wired up)
+# Database
 # ---------------------------------------------------------------------------
 
 
-async def get_db():
-    """Yield an async SQLAlchemy session.
+async def get_db() -> AsyncGenerator:
+    """Yield an async SQLAlchemy session."""
+    from backend.db.session import async_session
 
-    TODO: Wire up once db/session.py async_session factory is initialized.
-    """
-    raise NotImplementedError("Database session not yet configured")
+    async with async_session() as session:
+        yield session
 
 
 # ---------------------------------------------------------------------------
-# Redis (placeholder — not yet wired up)
+# Redis
 # ---------------------------------------------------------------------------
+
+_redis_client = None
+
+
+def set_redis_client(client) -> None:
+    """Register the Redis client created at application startup."""
+    global _redis_client
+    _redis_client = client
 
 
 async def get_redis():
-    """Yield a Redis connection.
-
-    TODO: Wire up once redis client is initialized at startup.
-    """
-    raise NotImplementedError("Redis connection not yet configured")
+    """Return the application-level Redis client, or None if unavailable."""
+    return _redis_client
 
 
 # ---------------------------------------------------------------------------

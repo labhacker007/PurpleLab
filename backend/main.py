@@ -83,6 +83,13 @@ async def on_startup() -> None:
         app.state.redis = None
         logger.warning("Redis unavailable (in-memory fallback active): %s", exc)
 
+    # Wire Redis client into the dependency injection layer
+    try:
+        from backend.dependencies import set_redis_client
+        set_redis_client(app.state.redis)
+    except Exception as exc:
+        logger.warning("Could not wire Redis into dependencies: %s", exc)
+
     # 3. Seed log source schemas into ChromaDB (idempotent)
     try:
         from backend.log_sources.schema_registry import get_registry
