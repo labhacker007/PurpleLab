@@ -11,11 +11,16 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  LayoutDashboard,
+  Workflow,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
+import { useAuthStore } from "@/stores/auth"
 
 const navItems = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/pipeline", label: "Pipeline", icon: Workflow },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/environments", label: "Environments", icon: Server },
   { href: "/rules", label: "Rules", icon: FileText },
@@ -27,6 +32,7 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
+  const user = useAuthStore((s) => s.user)
 
   return (
     <aside
@@ -38,7 +44,7 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-14 items-center gap-3 border-b border-border px-4">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-white font-bold text-sm">
-          JS
+          PL
         </div>
         {!sidebarCollapsed && (
           <div>
@@ -49,7 +55,7 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-3">
+      <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
         {navItems.map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + "/")
@@ -72,21 +78,22 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Dashboard link */}
-      <div className="p-3">
-        <Link
-          href="/"
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-            pathname === "/"
-              ? "bg-primary/10 text-primary"
-              : "text-muted hover:text-text hover:bg-bg"
-          )}
-        >
-          <BarChart3 className="h-4 w-4 shrink-0" />
-          {!sidebarCollapsed && <span>Dashboard</span>}
-        </Link>
-      </div>
+      {/* User info */}
+      {user && !sidebarCollapsed && (
+        <div className="border-t border-border px-4 py-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">
+              {(user.full_name || user.email)[0].toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-text truncate">
+                {user.full_name || user.email}
+              </div>
+              <div className="text-[10px] text-muted capitalize">{user.role}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Collapse toggle */}
       <div className="border-t border-border p-3">

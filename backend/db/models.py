@@ -319,3 +319,112 @@ class LogSourceSchema(Base):
     sample_event: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── Organizations ────────────────────────────────────────────────────────────
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200))
+    slug: Mapped[str] = mapped_column(String(100), unique=True)
+    plan: Mapped[str] = mapped_column(String(20), default="free")  # free/pro/enterprise
+    settings: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+    users: Mapped[list["User"]] = relationship("User", back_populates="org")
+
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    hashed_password: Mapped[str] = mapped_column(Text)
+    full_name: Mapped[str] = mapped_column(String(200), default="")
+    role: Mapped[str] = mapped_column(String(20), default="analyst")  # admin/engineer/analyst/viewer
+    org_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False)
+    api_key: Mapped[Optional[str]] = mapped_column(String(128), unique=True, nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+    org: Mapped[Optional[Organization]] = relationship("Organization", back_populates="users")
+    audit_logs: Mapped[list["AuditLog"]] = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(100))  # e.g. "login", "approve_hitl", "push_rule"
+    resource_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    resource_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    payload: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+    user: Mapped[Optional[User]] = relationship("User", back_populates="audit_logs")
+
+
+# ── Pipeline Config ───────────────────────────────────────────────────────────
+
+class PipelineConfig(Base):
+    __tablename__ = "pipeline_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    schedule_cron: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # e.g. "0 2 * * *"
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    chain_ids: Mapped[Optional[dict]] = mapped_column(JSONB)  # list of attack chain IDs
+    siem_connection_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("siem_connections.id", ondelete="SET NULL"), nullable=True
+    )
+    hitl_level_override: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notify_slack_channel: Mapped[str] = mapped_column(String(200), default="")
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+    runs: Mapped[list["PipelineRun"]] = relationship("PipelineRun", back_populates="pipeline", cascade="all, delete-orphan")
+
+
+# ── Pipeline Run ──────────────────────────────────────────────────────────────
+
+class PipelineRun(Base):
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    pipeline_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pipeline_configs.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/running/completed/failed/cancelled
+    triggered_by: Mapped[str] = mapped_column(String(50), default="scheduler")  # scheduler/manual/api
+    chains_run: Mapped[int] = mapped_column(Integer, default=0)
+    events_generated: Mapped[int] = mapped_column(Integer, default=0)
+    detections_fired: Mapped[int] = mapped_column(Integer, default=0)
+    des_before: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    des_after: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    report_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+    pipeline: Mapped[PipelineConfig] = relationship("PipelineConfig", back_populates="runs")

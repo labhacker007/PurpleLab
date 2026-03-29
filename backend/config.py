@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     OTX_API_KEY: str = ""                # AlienVault OTX DirectConnect key
     # AbuseEH (URLhaus, MalwareBazaar, ThreatFox) requires no API key
 
+    # Authentication / JWT
+    JWT_SECRET_KEY: str = "change-me-in-production-use-32-char-minimum"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    FIRST_SUPERADMIN_EMAIL: str = ""  # Auto-create on startup if set
+    FIRST_SUPERADMIN_PASSWORD: str = ""
+
     # Joti integration
     JOTI_BASE_URL: str = ""              # e.g. "https://joti.yourorg.com"
     JOTI_API_KEY: str = ""               # "joti_<64 hex chars>"

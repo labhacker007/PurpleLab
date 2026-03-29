@@ -36,6 +36,8 @@ pyyaml>=6.0.2
 
 # ── Security ──────────────────────────────────────────────────────────────────
 cryptography>=44.0.0
+PyJWT>=2.10.0             # JWT token creation and validation
+passlib[bcrypt]>=1.7.4    # Password hashing with bcrypt
 
 # ── Real-time ─────────────────────────────────────────────────────────────────
 websockets>=14.0

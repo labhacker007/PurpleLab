@@ -111,10 +111,50 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.warning("LLM router init failed: %s", exc)
 
+    # 6. Start pipeline scheduler
+    try:
+        from backend.pipeline.scheduler import get_scheduler
+        sched = await get_scheduler()
+        await sched.start()
+        logger.info("Pipeline scheduler started")
+    except Exception as exc:
+        logger.warning("Pipeline scheduler start failed: %s", exc)
+
+    # 7. Auto-create superadmin if FIRST_SUPERADMIN_EMAIL is set
+    if settings.FIRST_SUPERADMIN_EMAIL and settings.FIRST_SUPERADMIN_PASSWORD:
+        try:
+            from backend.auth.security import hash_password
+            from backend.db.session import async_session
+            from backend.db import models
+            from sqlalchemy import select
+            async with async_session() as db:
+                existing = await db.scalar(select(models.User).where(models.User.email == settings.FIRST_SUPERADMIN_EMAIL))
+                if not existing:
+                    user = models.User(
+                        email=settings.FIRST_SUPERADMIN_EMAIL,
+                        hashed_password=hash_password(settings.FIRST_SUPERADMIN_PASSWORD),
+                        full_name="Super Admin",
+                        role="admin",
+                        is_superadmin=True,
+                        is_active=True,
+                    )
+                    db.add(user)
+                    await db.commit()
+                    logger.info("Created superadmin: %s", settings.FIRST_SUPERADMIN_EMAIL)
+        except Exception as exc:
+            logger.warning("Superadmin auto-create failed: %s", exc)
+
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
     logger.info("PurpleLab v2 shutting down")
+
+    try:
+        from backend.pipeline.scheduler import get_scheduler
+        sched = await get_scheduler()
+        sched.stop()
+    except Exception:
+        pass
 
     try:
         from backend.db.session import close_db

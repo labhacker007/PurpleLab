@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 import "./globals.css"
 import { Sidebar } from "@/components/sidebar"
+import { AuthProvider } from "@/components/auth-provider"
+import { UserMenu } from "@/components/user-menu"
 
 export const metadata: Metadata = {
   title: "PurpleLab",
@@ -15,13 +17,15 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="bg-bg text-text antialiased">
-        <div className="flex h-screen overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 flex flex-col overflow-hidden">
-            <Header />
-            <div className="flex-1 overflow-auto p-6">{children}</div>
-          </main>
-        </div>
+        <AuthProvider>
+          <div className="flex h-screen overflow-hidden">
+            <Sidebar />
+            <main className="flex-1 flex flex-col overflow-hidden">
+              <Header />
+              <div className="flex-1 overflow-auto p-6">{children}</div>
+            </main>
+          </div>
+        </AuthProvider>
       </body>
     </html>
   )
@@ -34,7 +38,8 @@ function Header() {
       <span className="ml-2 text-xs text-muted">v2.0</span>
       <div className="flex-1" />
       <div className="flex items-center gap-3">
-        <span className="text-xs text-muted">Security Product Simulator</span>
+        <span className="hidden md:block text-xs text-muted">Security Product Simulator</span>
+        <UserMenu />
       </div>
     </header>
   )
