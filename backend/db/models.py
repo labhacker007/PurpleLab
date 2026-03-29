@@ -266,6 +266,47 @@ class ModelFunctionConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
 
 
+# ── HITL Approval Requests ───────────────────────────────────────────────────
+
+class HITLApprovalRequest(Base):
+    """Human-in-the-Loop approval request for a platform action."""
+    __tablename__ = "hitl_approval_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    action_type: Mapped[str] = mapped_column(String(100))       # e.g. "run_attack_chain", "push_rule"
+    action_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    level: Mapped[int] = mapped_column(Integer, default=1)       # L0-L3
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|approved|rejected|expired|auto_approved
+    requested_by: Mapped[str] = mapped_column(String(255), default="agent")
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    review_note: Mapped[str] = mapped_column(Text, default="")
+    magic_link_token: Mapped[Optional[str]] = mapped_column(String(128), unique=True, nullable=True)
+    magic_link_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    notification_channels: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # {slack_channel, email, pagerduty_key}
+    notifications_sent: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    auto_approve_after_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # L0 grace period
+    context: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # Extra metadata
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+# ── HITL Action Config ────────────────────────────────────────────────────────
+
+class HITLActionConfig(Base):
+    """Admin-configured HITL level per action type."""
+    __tablename__ = "hitl_action_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    action_type: Mapped[str] = mapped_column(String(100), unique=True)
+    level: Mapped[int] = mapped_column(Integer, default=1)
+    description: Mapped[str] = mapped_column(Text, default="")
+    notification_channels: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    auto_approve_after_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
 # ── Log Source Schemas ───────────────────────────────────────────────────────
 
 class LogSourceSchema(Base):

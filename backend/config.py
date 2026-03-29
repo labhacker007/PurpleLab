@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Vector DB
     CHROMA_PERSIST_DIR: str = "./data/chroma"
 
+    # Threat Intelligence API Keys
+    VIRUSTOTAL_API_KEY: str = ""         # VirusTotal API v3 key
+    OTX_API_KEY: str = ""                # AlienVault OTX DirectConnect key
+    # AbuseEH (URLhaus, MalwareBazaar, ThreatFox) requires no API key
+
     # Joti integration
     JOTI_BASE_URL: str = ""              # e.g. "https://joti.yourorg.com"
     JOTI_API_KEY: str = ""               # "joti_<64 hex chars>"

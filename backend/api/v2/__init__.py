@@ -12,6 +12,7 @@ from backend.api.v2.environments import router as environments_router
 from backend.api.v2.log_sources import router as log_sources_router
 from backend.api.v2.knowledge import router as knowledge_router
 from backend.api.v2.model_config import router as model_config_router
+from backend.api.v2.hitl import router as hitl_router
 
 v2_router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -24,3 +25,4 @@ v2_router.include_router(environments_router)
 v2_router.include_router(log_sources_router)
 v2_router.include_router(knowledge_router)
 v2_router.include_router(model_config_router)
+v2_router.include_router(hitl_router)

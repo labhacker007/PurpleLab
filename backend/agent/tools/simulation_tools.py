@@ -1,7 +1,10 @@
 """Simulation engine tools for the agent orchestrator.
 
 Provides tools for starting, stopping, and monitoring simulation
-sessions that generate security product events.
+sessions that generate security product events, and for running
+attack chain simulations.
+
+HIGH-RISK OPERATIONS (run_attack_chain) require L1_SOFT HITL approval.
 """
 from __future__ import annotations
 
@@ -13,6 +16,43 @@ from typing import Any
 from backend.agent.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+async def _require_approval(action_type: str, summary: str, payload: dict) -> dict[str, Any] | None:
+    """HITL gate helper (mirrors siem_tools version for independence)."""
+    try:
+        from backend.hitl.engine import get_hitl_engine
+        from backend.hitl.models import HITLLevel
+
+        engine = get_hitl_engine()
+        config = engine.get_config(action_type)
+
+        if config.level == HITLLevel.L0_AUTO:
+            return None
+
+        pending = await engine.list_pending(100)
+        for req_dict in pending:
+            if req_dict.get("action_type") == action_type and req_dict.get("status") in (
+                "approved", "auto_approved"
+            ):
+                return None
+
+        level_name = config.level.name
+        return {
+            "error": "approval_required",
+            "message": (
+                f"Action '{action_type}' requires {level_name} approval before execution. "
+                f"Call check_approval_requirement('{action_type}') to see what is needed, "
+                f"then request_approval('{action_type}', ...) followed by wait_for_approval(). "
+                f"Do NOT retry this tool until approval is granted."
+            ),
+            "action_type": action_type,
+            "required_level": int(config.level),
+            "required_level_name": level_name,
+        }
+    except Exception as exc:
+        logger.warning("HITL gate check failed for '%s': %s — proceeding without gate", action_type, exc)
+        return None
 
 # Module-level session tracking for active simulations started via tools.
 # The SessionManager requires typed config objects; this lightweight tracker
@@ -112,6 +152,64 @@ def register_tools(registry: ToolRegistry) -> None:
             "required": ["session_id"],
         },
         handler=_get_simulation_status,
+    )
+
+    registry.register(
+        name="list_attack_chains",
+        description=(
+            "List all available built-in attack chain templates. "
+            "Returns chain IDs, names, descriptions, stages, and MITRE technique mappings. "
+            "Use this to discover available chains before calling run_attack_chain."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=_list_attack_chains,
+    )
+
+    registry.register(
+        name="run_attack_chain",
+        description=(
+            "Execute a multi-stage attack chain simulation. Runs a predefined or custom "
+            "attack chain that generates correlated log events across multiple techniques. "
+            "Each stage generates events tagged with the chain correlation ID. "
+            "IMPORTANT: This requires L1_SOFT approval. Call request_approval('run_attack_chain', ...) "
+            "first — the chain will auto-execute after the grace period unless rejected."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "chain_id": {
+                    "type": "string",
+                    "description": (
+                        "ID of a built-in attack chain to run. "
+                        "Use list_attack_chains to see available options. "
+                        "Leave empty to use chain_yaml instead."
+                    ),
+                },
+                "chain_yaml": {
+                    "type": "string",
+                    "description": (
+                        "Custom attack chain definition in YAML format. "
+                        "Use this to define a custom chain instead of a built-in one."
+                    ),
+                },
+                "simulate_delays": {
+                    "type": "boolean",
+                    "description": "Whether to simulate realistic timing delays between stages (default: false).",
+                    "default": False,
+                },
+                "parallelise": {
+                    "type": "boolean",
+                    "description": "Whether to run independent stages in parallel (default: false).",
+                    "default": False,
+                },
+            },
+            "required": [],
+        },
+        handler=_run_attack_chain,
     )
 
 
@@ -306,3 +404,105 @@ async def _get_simulation_status(session_id: str) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("get_simulation_status failed for '%s'", session_id)
         return {"error": f"Failed to get simulation status: {exc}"}
+
+
+async def _list_attack_chains() -> dict[str, Any]:
+    """List all available attack chain templates."""
+    try:
+        from backend.attack_chains.orchestrator import AttackChainOrchestrator
+
+        orch = AttackChainOrchestrator()
+        chains = []
+        for chain_id, chain in orch.builtin_chains.items():
+            chains.append({
+                "chain_id": chain_id,
+                "name": chain.name,
+                "description": chain.description,
+                "threat_actor": chain.threat_actor,
+                "stage_count": len(chain.stages),
+                "stages": [
+                    {
+                        "stage_id": s.stage_id,
+                        "name": s.name,
+                        "technique_id": s.technique_id,
+                        "tactic": s.tactic,
+                        "source_ids": s.source_ids,
+                    }
+                    for s in chain.stages
+                ],
+                "mitre_techniques": list({s.technique_id for s in chain.stages if s.technique_id}),
+            })
+
+        return {
+            "status": "success",
+            "count": len(chains),
+            "chains": chains,
+        }
+    except Exception as exc:
+        logger.exception("list_attack_chains failed")
+        return {"error": f"Failed to list attack chains: {exc}"}
+
+
+async def _run_attack_chain(
+    chain_id: str = "",
+    chain_yaml: str = "",
+    simulate_delays: bool = False,
+    parallelise: bool = False,
+) -> dict[str, Any]:
+    """Execute an attack chain simulation (HITL L1_SOFT gated)."""
+    if not chain_id and not chain_yaml:
+        return {
+            "error": "Provide either a chain_id (use list_attack_chains) or a chain_yaml definition.",
+        }
+
+    # Identify what we're about to run for the HITL payload
+    run_label = chain_id or "custom chain"
+
+    # HITL gate
+    gate_error = await _require_approval(
+        "run_attack_chain",
+        f"Execute attack chain simulation: '{run_label}'",
+        {"chain_id": chain_id, "has_custom_yaml": bool(chain_yaml)},
+    )
+    if gate_error:
+        return gate_error
+
+    try:
+        from backend.attack_chains.orchestrator import AttackChainOrchestrator
+
+        orch = AttackChainOrchestrator()
+
+        if chain_yaml:
+            result = await orch.run_yaml(
+                chain_yaml,
+                simulate_delays=simulate_delays,
+                parallelise=parallelise,
+            )
+        else:
+            chain = orch.builtin_chains.get(chain_id)
+            if not chain:
+                available = list(orch.builtin_chains.keys())
+                return {
+                    "error": f"Unknown chain_id '{chain_id}'.",
+                    "available_chains": available,
+                }
+            result = await orch.run(
+                chain,
+                simulate_delays=simulate_delays,
+                parallelise=parallelise,
+            )
+
+        return {
+            "status": "success",
+            "chain_id": chain_id or "custom",
+            "chain_name": result.get("chain_name", ""),
+            "correlation_id": result.get("correlation_id", ""),
+            "stages_completed": result.get("stages_completed", 0),
+            "total_events": result.get("total_events", 0),
+            "duration_seconds": result.get("duration_seconds", 0),
+            "stage_results": result.get("stage_results", []),
+            "mitre_techniques": result.get("mitre_techniques", []),
+        }
+    except Exception as exc:
+        logger.exception("run_attack_chain failed")
+        return {"error": f"Failed to run attack chain: {exc}"}

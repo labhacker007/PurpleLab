@@ -22,6 +22,8 @@ def register_all_tools(registry: ToolRegistry) -> None:
     from backend.agent.tools import siem_tools
     from backend.agent.tools import knowledge_tools
     from backend.agent.tools import simulation_tools
+    from backend.agent.tools import sigma_tools
+    from backend.agent.tools import hitl_tools
 
     threat_intel_tools.register_tools(registry)
     rule_tools.register_tools(registry)
@@ -29,3 +31,5 @@ def register_all_tools(registry: ToolRegistry) -> None:
     siem_tools.register_tools(registry)
     knowledge_tools.register_tools(registry)
     simulation_tools.register_tools(registry)
+    sigma_tools.register_tools(registry)
+    hitl_tools.register_tools(registry)
