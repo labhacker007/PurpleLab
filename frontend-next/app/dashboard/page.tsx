@@ -280,7 +280,7 @@ export default function DashboardPage() {
           )}
         </div>
         <Button
-          variant="outline"
+         
           size="sm"
           onClick={() => void fetchMetrics(true)}
           disabled={isRefreshing}

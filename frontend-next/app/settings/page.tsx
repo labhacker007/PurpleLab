@@ -420,7 +420,7 @@ function ProfileTab() {
               </p>
             )}
             <Button
-              variant="outline"
+             
               size="sm"
               onClick={rotateApiKey}
               disabled={rotating}
@@ -798,7 +798,7 @@ function DangerZoneTab() {
             <Button
               size="sm"
               className="bg-red/10 text-red border border-red/30 hover:bg-red/20"
-              variant="outline"
+             
               onClick={() => setModal('sim-data')}
             >
               Delete Data
@@ -816,7 +816,7 @@ function DangerZoneTab() {
             <Button
               size="sm"
               className="bg-red/10 text-red border border-red/30 hover:bg-red/20"
-              variant="outline"
+             
               onClick={() => setModal('scores')}
             >
               Reset Scores
@@ -833,7 +833,7 @@ function DangerZoneTab() {
             </div>
             <Button
               size="sm"
-              variant="outline"
+             
               onClick={exportAll}
               disabled={exporting}
             >

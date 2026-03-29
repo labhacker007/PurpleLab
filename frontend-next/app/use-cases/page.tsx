@@ -239,7 +239,7 @@ function StatusBadge({ status }: { status: UseCaseStatus }) {
       {status === 'running' && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
       {status === 'never' && <span>—</span>}
       {status !== 'never' && (
-        <span className="capitalize">{status === 'never' ? '' : status}</span>
+        <span className="capitalize">{status}</span>
       )}
     </span>
   )

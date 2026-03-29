@@ -137,7 +137,7 @@ export default function EnvironmentsPage() {
                     <Link href={`/environments/${env.id}`} className="block">
                       <Button
                         size="sm"
-                        variant="outline"
+                       
                         className="w-full gap-1.5 group-hover:border-primary group-hover:text-primary transition-colors"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />

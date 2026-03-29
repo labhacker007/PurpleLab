@@ -273,7 +273,7 @@ function GenerateModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
+          <Button size="sm" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button size="sm" onClick={() => void handleSubmit()} disabled={isSubmitting}>
@@ -608,7 +608,7 @@ export default function ReportsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+           
             size="sm"
             onClick={() => void fetchReports(true)}
             disabled={isRefreshing}

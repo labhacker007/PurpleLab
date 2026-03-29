@@ -326,7 +326,7 @@ export default function SessionsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void fetchSessions()}>
+          <Button size="sm" onClick={() => void fetchSessions()}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Button size="sm" onClick={() => setShowCreate(true)}>

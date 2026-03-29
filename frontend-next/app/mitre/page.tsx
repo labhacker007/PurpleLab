@@ -244,7 +244,7 @@ function DetailPanel({
             <div className="flex flex-wrap gap-2">
               {coverageBadge(detail)}
               {detail.platforms?.map((p) => (
-                <Badge key={p} variant="outline" className="text-[10px] text-slate-400 border-slate-600">
+                <Badge key={p} className="text-[10px] text-slate-400 border-slate-600">
                   {p}
                 </Badge>
               ))}

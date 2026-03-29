@@ -294,7 +294,7 @@ function ProviderCards() {
               {/* Test button */}
               <Button
                 size="sm"
-                variant="outline"
+               
                 className="w-full h-7 text-xs"
                 onClick={() => testProvider(provider)}
                 disabled={s.testing}
@@ -497,7 +497,7 @@ function FunctionRow({
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          variant="outline"
+         
           className="h-7 text-xs"
           onClick={onTest}
           disabled={testing || saving}
@@ -724,7 +724,7 @@ export default function ModelConfigPage() {
               {resetting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
               Reset Defaults
             </Button>
-            <Button variant="outline" size="sm" onClick={handleTestAll} disabled={testingAll || loading}>
+            <Button size="sm" onClick={handleTestAll} disabled={testingAll || loading}>
               {testingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
               {testingAll ? 'Testing All…' : 'Test All'}
             </Button>

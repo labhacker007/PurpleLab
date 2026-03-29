@@ -624,7 +624,7 @@ export default function SessionDetailPage() {
           {session.status === 'running' && (
             <Button
               size="sm"
-              variant="outline"
+             
               onClick={() => void handleStop()}
               disabled={isStopping}
               className="text-red border-red/30 hover:bg-red/10 hover:text-red"
@@ -634,7 +634,7 @@ export default function SessionDetailPage() {
             </Button>
           )}
           <div className="relative group">
-            <Button size="sm" variant="outline">
+            <Button size="sm">
               <Download className="h-3.5 w-3.5" />
               Export
             </Button>

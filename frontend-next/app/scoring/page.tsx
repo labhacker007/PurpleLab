@@ -616,11 +616,11 @@ export default function ScoringPage() {
               {snapshotMsg}
             </span>
           )}
-          <Button variant="outline" size="sm" onClick={handleSnapshot} disabled={snapshotting}>
+          <Button size="sm" onClick={handleSnapshot} disabled={snapshotting}>
             <Camera className={cn('h-3.5 w-3.5', snapshotting && 'animate-pulse')} />
             Take Snapshot
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void fetchAll(true)}>
+          <Button size="sm" onClick={() => void fetchAll(true)}>
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
           </Button>
@@ -863,7 +863,7 @@ export default function ScoringPage() {
                       </div>
                       <Button
                         size="sm"
-                        variant="outline"
+                       
                         className="shrink-0 text-xs h-7"
                         onClick={() =>
                           router.push(`/use-cases?technique=${gap.technique_id}`)
@@ -916,7 +916,7 @@ export default function ScoringPage() {
                         </div>
                         <Button
                           size="sm"
-                          variant="outline"
+                         
                           className="shrink-0 text-xs h-7"
                           onClick={() =>
                             router.push(`/rules?search=${encodeURIComponent(win.technique_id)}`)

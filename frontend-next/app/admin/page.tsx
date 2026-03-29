@@ -178,7 +178,7 @@ function ConfirmModal({
           </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>
+          <Button size="sm" onClick={onCancel}>
             Cancel
           </Button>
           <Button variant="destructive" size="sm" onClick={onConfirm}>
@@ -337,7 +337,7 @@ function UsersTab() {
             className="h-9 w-full rounded-lg border border-border bg-bg pl-9 pr-3 text-sm text-text placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
-        <Button variant="outline" size="sm" onClick={() => void fetchUsers()} disabled={loading}>
+        <Button size="sm" onClick={() => void fetchUsers()} disabled={loading}>
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
         </Button>
@@ -523,7 +523,7 @@ function AuditTab() {
           ))}
         </div>
 
-        <Button variant="outline" size="sm" onClick={() => void fetchAudit()} disabled={loading}>
+        <Button size="sm" onClick={() => void fetchAudit()} disabled={loading}>
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
         </Button>
@@ -594,7 +594,7 @@ function AuditTab() {
         </span>
         <div className="flex items-center gap-1">
           <Button
-            variant="outline"
+           
             size="sm"
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page <= 1 || loading}
@@ -604,7 +604,7 @@ function AuditTab() {
           </Button>
           <span className="px-2">Page {page} of {totalPages}</span>
           <Button
-            variant="outline"
+           
             size="sm"
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages || loading}

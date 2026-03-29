@@ -27,7 +27,9 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - purplelab
+      purplelab:
+        aliases:
+          - purplelab-postgres
 
   # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
@@ -61,14 +63,15 @@ services:
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
+      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@purplelab-postgres:5432/purplelab
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       CHROMA_PERSIST_DIR: /app/data/chroma
       PYTHONUNBUFFERED: "1"
+      JOTI_BASE_URL: http://host.docker.internal:8000
     ports:
-      - "8000:8000"
+      - "${PURPLELAB_BACKEND_PORT:-8002}:8000"
     volumes:
       - ./data:/app/data
     depends_on:
@@ -92,7 +95,6 @@ services:
           memory: 512M
     networks:
       - purplelab
-      - joti_default
 
   # ── Celery Worker ───────────────────────────────────────────────────────────
   celery_worker:
@@ -103,7 +105,7 @@ services:
     command: celery -A backend.celery_app worker --loglevel=info --concurrency=2
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
+      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@purplelab-postgres:5432/purplelab
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -138,7 +140,7 @@ services:
     command: celery -A backend.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
+      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@purplelab-postgres:5432/purplelab
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -166,7 +168,7 @@ services:
     environment:
       NODE_ENV: production
     ports:
-      - "3000:3000"
+      - "${PURPLELAB_FRONTEND_PORT:-3002}:3000"
     depends_on:
       backend:
         condition: service_healthy

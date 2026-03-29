@@ -367,7 +367,7 @@ function InspectorPanel({
           <div className="text-sm font-semibold text-slate-100">{String(d.label ?? "")}</div>
         </div>
 
-        {d.category && (
+        {Boolean(d.category) && (
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Category</div>
             <Badge className={cn("text-[10px]", CATEGORY_COLORS[String(d.category)] ?? "")}>
@@ -376,7 +376,7 @@ function InspectorPanel({
           </div>
         )}
 
-        {d.source_id && (
+        {Boolean(d.source_id) && (
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Source ID</div>
             <code className="text-xs font-mono text-violet-300 bg-slate-800 px-2 py-1 rounded">
@@ -385,7 +385,7 @@ function InspectorPanel({
           </div>
         )}
 
-        {d.technique && (
+        {Boolean(d.technique) && (
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">MITRE Technique</div>
             <code className="text-xs font-mono text-slate-200 bg-slate-800 px-2 py-1 rounded">
@@ -398,9 +398,9 @@ function InspectorPanel({
           <div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Status</div>
             <div className="flex items-center gap-1.5">
-              {d.status === "pass" || d.status === "PASS" ? (
+              {String(d.status) === "pass" || String(d.status) === "PASS" ? (
                 <CheckCircle className="h-4 w-4 text-green-400" />
-              ) : d.status === "fail" || d.status === "FAIL" ? (
+              ) : String(d.status) === "fail" || String(d.status) === "FAIL" ? (
                 <XCircle className="h-4 w-4 text-red-400" />
               ) : (
                 <Circle className="h-4 w-4 text-slate-500" />
@@ -428,7 +428,7 @@ function InspectorPanel({
       {/* Actions */}
       <div className="p-4 border-t border-slate-800 space-y-2">
         <Button
-          variant="outline"
+         
           size="sm"
           className="w-full justify-start text-slate-300 border-slate-700 hover:border-slate-500"
           onClick={() => onDuplicate(node.id)}
@@ -1181,7 +1181,7 @@ export default function EnvironmentCanvasPage({
 
         {/* Actions */}
         <Button
-          variant="outline"
+         
           size="sm"
           onClick={handleSave}
           disabled={saving}

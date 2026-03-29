@@ -622,7 +622,7 @@ export default function LogSourcesPage() {
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-white">{chain.name}</p>
                       {chain.threat_actor && (
-                        <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400 py-0">
+                        <Badge className="text-[10px] border border-slate-600 text-slate-400 py-0 bg-transparent">
                           {chain.threat_actor}
                         </Badge>
                       )}

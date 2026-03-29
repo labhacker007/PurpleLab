@@ -224,7 +224,7 @@ function NewDocModal({
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button size="sm" onClick={() => void handleSubmit()} disabled={saving}>
             {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
             Create
@@ -303,7 +303,7 @@ function ImportURLModal({
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button size="sm" onClick={() => void handleImport()} disabled={saving}>
             {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
             Import
@@ -532,7 +532,7 @@ function DocEditor({
         </div>
         <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+           
             size="sm"
             onClick={() => void handleReindex()}
             disabled={saving}
@@ -545,7 +545,7 @@ function DocEditor({
             <>
               <span className="text-xs text-red-400">Confirm delete?</span>
               <Button
-                variant="outline"
+               
                 size="sm"
                 onClick={() => setConfirmDelete(false)}
               >
@@ -563,7 +563,7 @@ function DocEditor({
             </>
           ) : (
             <Button
-              variant="outline"
+             
               size="sm"
               onClick={() => void handleDelete()}
               className="text-red-400 hover:text-red-300 hover:border-red-400/50"
@@ -716,7 +716,7 @@ export default function KnowledgePage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-text">Knowledge Base</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowImportURL(true)}>
+          <Button size="sm" onClick={() => setShowImportURL(true)}>
             <Link2 className="h-3.5 w-3.5" />
             Import URL
           </Button>
@@ -821,7 +821,7 @@ export default function KnowledgePage() {
                   Select a document from the list or create a new one
                 </p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setShowNewDoc(true)}>
+              <Button size="sm" onClick={() => setShowNewDoc(true)}>
                 <Plus className="h-3.5 w-3.5" />
                 New Document
               </Button>

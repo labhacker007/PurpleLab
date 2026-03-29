@@ -386,7 +386,7 @@ function NewPipelineDrawer({
 
         {/* Submit */}
         <div className="flex gap-3 pt-2">
-          <Button variant="outline" className="flex-1" onClick={onClose} disabled={isSaving}>
+          <Button className="flex-1" onClick={onClose} disabled={isSaving}>
             Cancel
           </Button>
           <Button className="flex-1" onClick={() => void handleSubmit()} disabled={isSaving}>
@@ -476,7 +476,7 @@ function PipelineCard({
           <div className="flex items-center gap-1.5 shrink-0">
             <Button
               size="sm"
-              variant="outline"
+             
               onClick={() => onRun(pipeline.id)}
               disabled={running || pipeline.status === 'running'}
             >
@@ -669,7 +669,7 @@ export default function PipelinePage() {
           <p className="text-xs text-muted mt-0.5">Continuous automated attack simulations</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void fetchData()}>
+          <Button size="sm" onClick={() => void fetchData()}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Button size="sm" onClick={() => setDrawerOpen(true)}>

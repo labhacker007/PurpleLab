@@ -372,7 +372,7 @@ function Step2SIEM({
           </div>
           <div className="flex items-center gap-3">
             <Button
-              variant="outline"
+             
               size="sm"
               onClick={() => void handleTestConnection()}
               disabled={testing || saving || !hecUrl || !hecToken}
@@ -944,7 +944,7 @@ function Step5Validate({ selectedUseCaseId }: { selectedUseCaseId: string | null
           <div className="flex items-center gap-3 pt-2">
             {runId && (
               <Button
-                variant="outline"
+               
                 size="sm"
                 onClick={() => window.open(`/use-cases/${selectedUseCaseId}`, '_blank')}
               >
