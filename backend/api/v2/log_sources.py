@@ -6,6 +6,7 @@ Never uses hardcoded event templates.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -50,8 +51,134 @@ class ChainRunRequest(BaseModel):
     )
 
 
+class LogSourceCreateRequest(BaseModel):
+    name: str = Field(..., max_length=255)
+    source_type: str = Field(..., max_length=50)
+    schema_definition: dict[str, Any] | None = Field(None)
+    sample_log: dict[str, Any] | None = Field(None)
+    enabled: bool = Field(True)
+    description: str = Field("", max_length=1000)
+
+
 # ---------------------------------------------------------------------------
-# Schema registry
+# Generator catalog
+# ---------------------------------------------------------------------------
+
+# Category display names and descriptions for each generator
+_GENERATOR_META: dict[str, dict[str, Any]] = {
+    "splunk": {
+        "name": "Splunk SIEM",
+        "category": "siem",
+        "description": "Splunk HEC-format alerts and search results with CIM compliance.",
+        "supported_fields": ["_time", "host", "source", "sourcetype", "index", "event", "severity", "rule_name"],
+    },
+    "crowdstrike": {
+        "name": "CrowdStrike Falcon",
+        "category": "edr",
+        "description": "CrowdStrike Falcon Streaming API DetectionSummaryEvent format.",
+        "supported_fields": ["DetectId", "DetectName", "Severity", "ComputerName", "UserName", "Tactic", "Technique", "TechniqueId", "CommandLine", "SHA256String"],
+    },
+    "sentinel": {
+        "name": "Microsoft Sentinel",
+        "category": "siem",
+        "description": "Azure Sentinel security alerts via Log Analytics workspace.",
+        "supported_fields": ["TimeGenerated", "AlertName", "AlertSeverity", "ProviderName", "Entities", "ExtendedProperties"],
+    },
+    "okta": {
+        "name": "Okta Identity",
+        "category": "identity",
+        "description": "Okta system log events for authentication and directory activity.",
+        "supported_fields": ["uuid", "eventType", "actor", "target", "outcome", "displayMessage", "severity", "client"],
+    },
+    "proofpoint": {
+        "name": "Proofpoint Email Security",
+        "category": "email",
+        "description": "Proofpoint TRAP/SIEM API message and click events.",
+        "supported_fields": ["messageId", "subject", "sender", "recipients", "phishScore", "spamScore", "verdict", "threatsInfoMap"],
+    },
+    "servicenow": {
+        "name": "ServiceNow ITSM",
+        "category": "itsm",
+        "description": "ServiceNow Security Incident Response (SIR) ticket records.",
+        "supported_fields": ["number", "category", "priority", "state", "assignment_group", "short_description", "caller_id", "cmdb_ci"],
+    },
+    "carbon_black": {
+        "name": "VMware Carbon Black",
+        "category": "edr",
+        "description": "Carbon Black Cloud alert and process events via CB Response API.",
+        "supported_fields": ["id", "alert_severity", "reason", "device_name", "process_name", "process_cmdline", "ioc_hit", "threat_id"],
+    },
+    "defender_endpoint": {
+        "name": "Microsoft Defender for Endpoint",
+        "category": "edr",
+        "description": "MDE Advanced Hunting / Alert API events.",
+        "supported_fields": ["AlertId", "Title", "Severity", "Category", "DeviceName", "ProcessCommandLine", "RemoteUrl", "SHA256"],
+    },
+    "entra_id": {
+        "name": "Microsoft Entra ID",
+        "category": "identity",
+        "description": "Azure AD / Entra sign-in and audit log events.",
+        "supported_fields": ["correlationId", "createdDateTime", "userPrincipalName", "appDisplayName", "ipAddress", "status", "riskDetail"],
+    },
+    "qradar": {
+        "name": "IBM QRadar SIEM",
+        "category": "siem",
+        "description": "QRadar offense and event records via REST API.",
+        "supported_fields": ["id", "offense_type", "severity", "magnitude", "status", "source_address_ids", "destination_networks", "category"],
+    },
+    "elastic": {
+        "name": "Elastic Security",
+        "category": "siem",
+        "description": "Elasticsearch ECS-format security alerts and signals.",
+        "supported_fields": ["@timestamp", "event.action", "event.category", "event.severity", "host.name", "user.name", "process.name", "kibana.alert.rule.name"],
+    },
+    "guardduty": {
+        "name": "AWS GuardDuty",
+        "category": "cloud",
+        "description": "AWS GuardDuty threat detection findings via CloudWatch Events.",
+        "supported_fields": ["id", "type", "severity", "accountId", "region", "service.action", "resource", "description"],
+    },
+}
+
+
+@router.get("/generators")
+async def list_generators():
+    """List all available event generators from GENERATOR_REGISTRY with metadata and a live sample event."""
+    from backend.engine.generators import GENERATOR_REGISTRY
+    from backend.engine.generators.base import GeneratorConfig
+
+    results = []
+    for gen_id, gen_class in GENERATOR_REGISTRY.items():
+        meta = _GENERATOR_META.get(gen_id, {})
+
+        # Generate a live sample event
+        sample_event: dict[str, Any] | None = None
+        try:
+            cfg = GeneratorConfig(
+                product_type=gen_id,
+                target_url="http://localhost:8080",
+            )
+            instance = gen_class(cfg)
+            sample_event = instance.generate()
+        except Exception:
+            sample_event = None
+
+        results.append({
+            "id": gen_id,
+            "name": meta.get("name", gen_class.product_name),
+            "category": meta.get("category", gen_class.product_category),
+            "description": meta.get("description", ""),
+            "supported_fields": meta.get("supported_fields", []),
+            "sample_event": sample_event,
+        })
+
+    # Sort by category then name
+    results.sort(key=lambda x: (x["category"], x["name"]))
+    return {"count": len(results), "generators": results}
+
+
+# ---------------------------------------------------------------------------
+# Schema registry (existing)
 # ---------------------------------------------------------------------------
 
 @router.get("/sources")
@@ -92,6 +219,129 @@ async def get_source_techniques(source_id: str):
             for tid, etypes in schema.mitre_mappings.items()
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Log source schema CRUD (DB-backed)
+# ---------------------------------------------------------------------------
+
+@router.get("")
+async def list_log_source_schemas():
+    """List all configured log source schemas from the database."""
+    try:
+        from backend.db.session import async_session
+        from backend.db.models import LogSourceSchema
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(LogSourceSchema).order_by(LogSourceSchema.created_at.desc())
+            )
+            schemas = result.scalars().all()
+            return {
+                "count": len(schemas),
+                "log_sources": [_schema_to_dict(s) for s in schemas],
+            }
+    except Exception as exc:
+        # DB not yet wired — return empty list gracefully
+        return {"count": 0, "log_sources": [], "warning": str(exc)}
+
+
+@router.post("")
+async def create_log_source_schema(req: LogSourceCreateRequest):
+    """Create a new log source schema configuration."""
+    try:
+        from backend.db.session import async_session
+        from backend.db.models import LogSourceSchema
+
+        async with async_session() as session:
+            schema = LogSourceSchema(
+                name=req.name,
+                source_type=req.source_type,
+                schema_definition=req.schema_definition or {},
+                sample_event=req.sample_log or {},
+                description=req.description,
+            )
+            session.add(schema)
+            await session.commit()
+            await session.refresh(schema)
+            return _schema_to_dict(schema)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/{schema_id}/test")
+async def test_log_source_schema(schema_id: str):
+    """Run a test generation for a log source schema. Returns 3 sample events."""
+    try:
+        from backend.db.session import async_session
+        from backend.db.models import LogSourceSchema
+        from sqlalchemy import select
+        from backend.engine.generators import GENERATOR_REGISTRY
+        from backend.engine.generators.base import GeneratorConfig
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(LogSourceSchema).where(LogSourceSchema.id == uuid.UUID(schema_id))
+            )
+            schema = result.scalar_one_or_none()
+
+        if not schema:
+            raise HTTPException(404, detail=f"Log source schema '{schema_id}' not found.")
+
+        # Try to find a matching generator by source_type
+        gen_class = GENERATOR_REGISTRY.get(schema.source_type)
+        if gen_class:
+            cfg = GeneratorConfig(
+                product_type=schema.source_type,
+                target_url="http://localhost:8080",
+            )
+            instance = gen_class(cfg)
+            events = instance.generate_batch(3)
+        else:
+            # Fallback: return the stored sample event 3 times
+            sample = schema.sample_event or {}
+            events = [sample, sample, sample]
+
+        return {
+            "schema_id": schema_id,
+            "source_type": schema.source_type,
+            "events": events,
+            "count": len(events),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/{schema_id}/schema")
+async def get_log_source_json_schema(schema_id: str):
+    """Return the JSON schema for field validation of a log source."""
+    try:
+        from backend.db.session import async_session
+        from backend.db.models import LogSourceSchema
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(LogSourceSchema).where(LogSourceSchema.id == uuid.UUID(schema_id))
+            )
+            schema = result.scalar_one_or_none()
+
+        if not schema:
+            raise HTTPException(404, detail=f"Log source schema '{schema_id}' not found.")
+
+        return {
+            "schema_id": schema_id,
+            "name": schema.name,
+            "source_type": schema.source_type,
+            "schema_definition": schema.schema_definition or {},
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +463,22 @@ async def invalidate_cache(source_id: str):
 
 @router.get("/attack-chains")
 async def list_attack_chains():
-    """List all built-in attack chain definitions."""
-    from backend.attack_chains.orchestrator import get_orchestrator
-    orch = get_orchestrator()
-    return {"chains": orch.list_builtin_chains()}
+    """List all built-in attack chain definitions with stage and technique counts."""
+    from backend.attack_chains.orchestrator import AttackChainOrchestrator
+    orch = AttackChainOrchestrator()
+    raw_chains = orch.list_builtin_chains()
+    # Enrich with mitre_techniques field alias
+    chains = []
+    for c in raw_chains:
+        chains.append({
+            "id": c["id"],
+            "name": c["name"],
+            "description": c["description"],
+            "threat_actor": c.get("threat_actor"),
+            "stage_count": c["stage_count"],
+            "mitre_techniques": c.get("techniques", []),
+        })
+    return {"count": len(chains), "chains": chains}
 
 
 @router.post("/attack-chains/run")
@@ -226,8 +488,8 @@ async def run_attack_chain(req: ChainRunRequest):
     Provide either chain_id (built-in) or chain_yaml (custom YAML).
     All events are tagged with a shared correlation_id for traceability.
     """
-    from backend.attack_chains.orchestrator import get_orchestrator, AttackChain
-    orch = get_orchestrator()
+    from backend.attack_chains.orchestrator import AttackChainOrchestrator, AttackChain
+    orch = AttackChainOrchestrator()
 
     if req.chain_yaml:
         chain = AttackChain.from_yaml_str(req.chain_yaml)
@@ -356,3 +618,19 @@ async def compute_ihds(
     scorer = IntelHuntDetectionScore()
     result = scorer.compute(intel, hunts, rules, technique_list, joti_hunt_score)
     return result.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _schema_to_dict(s: Any) -> dict[str, Any]:
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "source_type": s.source_type,
+        "schema_definition": s.schema_definition or {},
+        "sample_event": s.sample_event or {},
+        "description": s.description or "",
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
