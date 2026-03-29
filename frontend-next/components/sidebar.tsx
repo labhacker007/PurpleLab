@@ -13,6 +13,7 @@ import {
   ChevronRight,
   LayoutDashboard,
   Workflow,
+  ClipboardCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/environments", label: "Environments", icon: Server },
   { href: "/rules", label: "Rules", icon: FileText },
+  { href: "/use-cases", label: "Use Cases", icon: ClipboardCheck },
   { href: "/threat-intel", label: "Threat Intel", icon: Shield },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },

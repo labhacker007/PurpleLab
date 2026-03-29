@@ -428,3 +428,63 @@ class PipelineRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
 
     pipeline: Mapped[PipelineConfig] = relationship("PipelineConfig", back_populates="runs")
+
+
+# ── Use Cases ─────────────────────────────────────────────────────────────────
+
+class UseCase(Base):
+    """A specific attack scenario that should be detectable.
+
+    Represents a named test scenario tied to one or more MITRE techniques.
+    The platform simulates the scenario, runs detection rules against the
+    generated logs, and scores pass/fail to validate detection coverage.
+    """
+    __tablename__ = "use_cases"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(300))  # e.g. "Mimikatz LSASS Dump"
+    description: Mapped[str] = mapped_column(Text, default="")
+    technique_ids: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # ["T1003.001"]
+    tactic: Mapped[str] = mapped_column(String(100), default="")  # e.g. "credential-access"
+    threat_actor: Mapped[str] = mapped_column(String(200), default="")  # e.g. "APT29"
+    attack_chain_id: Mapped[str] = mapped_column(String(100), default="")  # link to builtin chain id
+    expected_log_sources: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # ["windows_security", "sysmon"]
+    severity: Mapped[str] = mapped_column(String(20), default="high")  # critical/high/medium/low
+    tags: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # ["windows", "credential", "apt"]
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)   # continuously tested in pipeline
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)  # comes from seed library
+    last_validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+    runs: Mapped[list["UseCaseRun"]] = relationship(
+        "UseCaseRun", back_populates="use_case", cascade="all, delete-orphan"
+    )
+
+
+class UseCaseRun(Base):
+    """A single execution of a use case validation cycle.
+
+    Created each time a use case is validated — stores the full results
+    of simulating the attack scenario and testing detection rules against
+    the generated logs.
+    """
+    __tablename__ = "use_case_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    use_case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("use_cases.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/running/passed/failed/partial/error
+    triggered_by: Mapped[str] = mapped_column(String(50), default="manual")  # manual/pipeline/scheduled/agent
+    events_generated: Mapped[int] = mapped_column(Integer, default=0)
+    rules_tested: Mapped[int] = mapped_column(Integer, default=0)
+    rules_fired: Mapped[int] = mapped_column(Integer, default=0)
+    pass_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # rules_fired/rules_tested
+    run_details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # per-rule results
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+    use_case: Mapped[UseCase] = relationship("UseCase", back_populates="runs")

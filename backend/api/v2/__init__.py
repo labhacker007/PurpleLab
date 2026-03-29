@@ -18,6 +18,7 @@ from backend.api.v2.dashboard import router as dashboard_router
 from backend.api.v2.admin import router as admin_router
 from backend.api.v2.pipeline import router as pipeline_router
 from backend.api.v2.scoring import router as scoring_router
+from backend.api.v2.use_cases import router as use_cases_router
 
 v2_router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -36,3 +37,4 @@ v2_router.include_router(dashboard_router)
 v2_router.include_router(admin_router)
 v2_router.include_router(pipeline_router)
 v2_router.include_router(scoring_router)
+v2_router.include_router(use_cases_router)

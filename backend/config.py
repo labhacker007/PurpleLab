@@ -36,11 +36,6 @@ class Settings(BaseSettings):
     # Vector DB
     CHROMA_PERSIST_DIR: str = "./data/chroma"
 
-    # Threat Intelligence API Keys
-    VIRUSTOTAL_API_KEY: str = ""         # VirusTotal API v3 key
-    OTX_API_KEY: str = ""                # AlienVault OTX DirectConnect key
-    # AbuseEH (URLhaus, MalwareBazaar, ThreatFox) requires no API key
-
     # Authentication / JWT
     JWT_SECRET_KEY: str = "change-me-in-production-use-32-char-minimum"
     JWT_ALGORITHM: str = "HS256"

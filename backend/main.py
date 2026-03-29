@@ -120,7 +120,17 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.warning("Pipeline scheduler start failed: %s", exc)
 
-    # 7. Auto-create superadmin if FIRST_SUPERADMIN_EMAIL is set
+    # 7. Seed built-in use cases
+    try:
+        from backend.use_cases.service import UseCaseService
+        svc = UseCaseService()
+        seeded = await svc.seed_builtin_use_cases()
+        if seeded:
+            logger.info("Seeded %d built-in use cases", seeded)
+    except Exception as exc:
+        logger.warning("Use case seeding skipped: %s", exc)
+
+    # 8. Auto-create superadmin if FIRST_SUPERADMIN_EMAIL is set
     if settings.FIRST_SUPERADMIN_EMAIL and settings.FIRST_SUPERADMIN_PASSWORD:
         try:
             from backend.auth.security import hash_password
