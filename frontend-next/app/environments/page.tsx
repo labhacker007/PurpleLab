@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, Server, Clock } from "lucide-react"
+import { Plus, Server, Clock, Layers, CheckCircle, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,25 @@ import type { Environment } from "@/types"
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 14)
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
+function getNodeCount(env: Environment): number {
+  return env.nodes.length
+}
+
+function getRuleCount(env: Environment): number {
+  return env.nodes.filter((n) => n.type === "rule_set").length
 }
 
 export default function EnvironmentsPage() {
@@ -44,7 +63,7 @@ export default function EnvironmentsPage() {
         <div>
           <h1 className="text-xl font-bold text-text">Environments</h1>
           <p className="text-sm text-muted mt-1">
-            Build and manage security lab environments with drag-and-drop canvas.
+            Build and manage detection environments with the visual canvas.
           </p>
         </div>
         <Button onClick={() => setShowCreate(true)}>
@@ -59,7 +78,7 @@ export default function EnvironmentsPage() {
             <Server className="h-12 w-12 text-muted mx-auto mb-4" />
             <h2 className="text-lg font-semibold">No environments yet</h2>
             <p className="text-sm text-muted mt-1">
-              Create your first environment to start building security lab topologies.
+              Create your first environment to start composing your detection topology.
             </p>
             <Button className="mt-4" onClick={() => setShowCreate(true)}>
               Create Environment
@@ -68,30 +87,68 @@ export default function EnvironmentsPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-3 gap-4">
-          {environments.map((env) => (
-            <Link key={env.id} href={`/environments/${env.id}`}>
-              <Card className="hover:border-primary transition-colors cursor-pointer h-full">
-                <CardContent className="p-5">
+          {environments.map((env) => {
+            const nodeCount = getNodeCount(env)
+            const ruleCount = getRuleCount(env)
+            const lastRun = env.last_tested ? timeAgo(env.last_tested) : null
+
+            return (
+              <Card
+                key={env.id}
+                className="hover:border-primary transition-colors h-full group"
+              >
+                <CardContent className="p-5 flex flex-col h-full">
+                  {/* Header */}
                   <div className="flex items-start justify-between mb-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue/10">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue/10 shrink-0">
                       <Server className="h-5 w-5 text-blue" />
                     </div>
-                    <Badge variant="info">{env.nodes.length} nodes</Badge>
+                    <Badge variant="info">{nodeCount} nodes</Badge>
                   </div>
+
+                  {/* Name & description */}
                   <h3 className="font-semibold text-sm">{env.name}</h3>
-                  <p className="text-xs text-muted mt-1 line-clamp-2">
+                  <p className="text-xs text-muted mt-1 line-clamp-2 flex-1">
                     {env.description || "No description"}
                   </p>
-                  {env.last_tested && (
-                    <div className="flex items-center gap-1 mt-3 text-[10px] text-muted">
-                      <Clock className="h-3 w-3" />
-                      Last tested: {new Date(env.last_tested).toLocaleDateString()}
+
+                  {/* Stats row */}
+                  <div className="flex items-center gap-3 mt-3 text-[10px] text-muted">
+                    <div className="flex items-center gap-1">
+                      <Layers className="h-3 w-3" />
+                      <span>{nodeCount} nodes</span>
                     </div>
-                  )}
+                    <div className="flex items-center gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      <span>{ruleCount} rules</span>
+                    </div>
+                    {lastRun ? (
+                      <div className="flex items-center gap-1 ml-auto">
+                        <Clock className="h-3 w-3" />
+                        <span>last run {lastRun}</span>
+                      </div>
+                    ) : (
+                      <span className="ml-auto text-muted/60">never run</span>
+                    )}
+                  </div>
+
+                  {/* Open Canvas button */}
+                  <div className="mt-4 pt-3 border-t border-border">
+                    <Link href={`/environments/${env.id}`} className="block">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full gap-1.5 group-hover:border-primary group-hover:text-primary transition-colors"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open Canvas
+                      </Button>
+                    </Link>
+                  </div>
                 </CardContent>
               </Card>
-            </Link>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -106,7 +163,7 @@ export default function EnvironmentsPage() {
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="My Security Lab"
+              placeholder="Corp SOC Prod"
               autoFocus
             />
           </div>

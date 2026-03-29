@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 
 from backend.auth.dependencies import get_optional_user
@@ -18,7 +18,10 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/metrics")
-async def get_metrics(current_user: models.User | None = Depends(get_optional_user)):
+async def get_metrics(
+    request: Request,
+    current_user: models.User | None = Depends(get_optional_user),
+):
     """Return all KPIs needed for the PurpleLab dashboard.
 
     Each metric is fetched independently; if a query fails the field returns
@@ -43,6 +46,9 @@ async def get_metrics(current_user: models.User | None = Depends(get_optional_us
         "coverage_by_tactic": {},
         "pipeline_runs_today": 0,
         "model_provider": None,
+        "llm_cache_hits_today": 0,
+        "llm_cache_misses_today": 0,
+        "llm_cache_hit_rate": None,
     }
 
     async with async_session() as db:
@@ -174,6 +180,23 @@ async def get_metrics(current_user: models.User | None = Depends(get_optional_us
         llm_router = get_llm_router()
         cfg = llm_router.get_config(LLMFunction.AGENT_CHAT)
         result["model_provider"] = cfg.provider if cfg else None
+    except Exception:
+        pass
+
+    # llm_cache_hits_today / llm_cache_misses_today / llm_cache_hit_rate
+    try:
+        redis = getattr(getattr(request, "app", None), "state", None)
+        redis = getattr(redis, "redis", None) if redis else None
+        if redis:
+            date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+            hits_raw = await redis.get(f"llm:stats:hits:{date_str}")
+            misses_raw = await redis.get(f"llm:stats:misses:{date_str}")
+            hits = int(hits_raw) if hits_raw else 0
+            misses = int(misses_raw) if misses_raw else 0
+            total = hits + misses
+            result["llm_cache_hits_today"] = hits
+            result["llm_cache_misses_today"] = misses
+            result["llm_cache_hit_rate"] = round(hits / total, 4) if total > 0 else None
     except Exception:
         pass
 

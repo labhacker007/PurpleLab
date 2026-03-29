@@ -5,10 +5,17 @@ import { Sidebar } from '@/components/sidebar'
 import { UserMenu } from '@/components/user-menu'
 
 const AUTH_PATHS = ['/login', '/register']
+// Onboarding is full-screen — renders its own layout
+const FULLSCREEN_PATHS = ['/onboarding']
 
 export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isAuthPage = AUTH_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
+  const isFullscreen = FULLSCREEN_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))
+
+  if (isFullscreen) {
+    return <>{children}</>
+  }
 
   if (isAuthPage) {
     return (

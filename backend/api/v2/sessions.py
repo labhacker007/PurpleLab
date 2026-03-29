@@ -184,6 +184,159 @@ async def stop_session(session_id: str):
     return {"status": "stopped", "id": session_id}
 
 
+@router.get("/{session_id}/events/stream")
+async def stream_session_events(
+    session_id: str,
+    since_id: str | None = Query(None),
+):
+    """SSE stream of events for a session. Polls DB every 1.5s for new events.
+
+    Client sends ?since_id=<last_event_id> to get only new events.
+    Streams until session status is not 'running' and no new events for 5s.
+
+    Event format:
+    data: {"id": "...", "source_type": "...", "technique_id": "...",
+           "severity": "...", "payload": {...}, "created_at": "..."}
+    """
+    from fastapi.responses import StreamingResponse
+    import asyncio
+    import json
+
+    async def event_generator():
+        last_id = since_id
+        idle_count = 0
+
+        while True:
+            async with async_session() as db:
+                # Query new events
+                query = (
+                    select(GeneratedEvent)
+                    .where(GeneratedEvent.session_id == uuid.UUID(session_id))
+                    .order_by(GeneratedEvent.created_at)
+                )
+
+                if last_id:
+                    # Get events after the last seen one (UUID-based cursor via created_at)
+                    subq = select(GeneratedEvent.created_at).where(
+                        GeneratedEvent.id == uuid.UUID(last_id)
+                    ).scalar_subquery()
+                    query = query.where(GeneratedEvent.created_at > subq)
+
+                query = query.limit(50)
+                result = await db.execute(query)
+                events = result.scalars().all()
+
+                if events:
+                    idle_count = 0
+                    for event in events:
+                        data = {
+                            "id": str(event.id),
+                            "source_type": event.product_type or "",
+                            "technique_id": event.title or "",
+                            "severity": event.severity or "info",
+                            "payload": event.payload or {},
+                            "created_at": event.created_at.isoformat() if event.created_at else "",
+                        }
+                        last_id = str(event.id)
+                        yield f"data: {json.dumps(data)}\n\n"
+                else:
+                    idle_count += 1
+                    # Check session status
+                    session_q = await db.execute(
+                        select(SimulationSession).where(
+                            SimulationSession.id == uuid.UUID(session_id)
+                        )
+                    )
+                    sess = session_q.scalar_one_or_none()
+                    if not sess or (sess.status != "running" and idle_count > 3):
+                        yield 'data: {"type": "done"}\n\n'
+                        break
+
+            # Send heartbeat every 5 polls
+            if idle_count > 0 and idle_count % 5 == 0:
+                yield ": heartbeat\n\n"
+
+            await asyncio.sleep(1.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.get("/{session_id}/stats")
+async def get_session_stats(session_id: str):
+    """Returns event counts, severity breakdown, top techniques, top sources."""
+    await _get_or_404(session_id)
+
+    async with async_session() as db:
+        # Total events
+        total_result = await db.execute(
+            select(func.count()).select_from(GeneratedEvent).where(
+                GeneratedEvent.session_id == uuid.UUID(session_id)
+            )
+        )
+        total_events = total_result.scalar() or 0
+
+        # By severity
+        sev_result = await db.execute(
+            select(GeneratedEvent.severity, func.count().label("cnt"))
+            .where(GeneratedEvent.session_id == uuid.UUID(session_id))
+            .group_by(GeneratedEvent.severity)
+        )
+        by_severity = {row.severity: row.cnt for row in sev_result}
+
+        # By source (product_type)
+        src_result = await db.execute(
+            select(GeneratedEvent.product_type, func.count().label("cnt"))
+            .where(GeneratedEvent.session_id == uuid.UUID(session_id))
+            .group_by(GeneratedEvent.product_type)
+            .order_by(desc(func.count()))
+            .limit(10)
+        )
+        by_source = {row.product_type: row.cnt for row in src_result}
+
+        # Top techniques (derived from title)
+        tech_result = await db.execute(
+            select(GeneratedEvent.title, func.count().label("cnt"))
+            .where(GeneratedEvent.session_id == uuid.UUID(session_id))
+            .group_by(GeneratedEvent.title)
+            .order_by(desc(func.count()))
+            .limit(10)
+        )
+        top_techniques = [
+            {"technique_id": row.title, "count": row.cnt} for row in tech_result
+        ]
+
+        # Events per minute: based on created_at range
+        range_result = await db.execute(
+            select(
+                func.min(GeneratedEvent.created_at).label("first"),
+                func.max(GeneratedEvent.created_at).label("last"),
+            ).where(GeneratedEvent.session_id == uuid.UUID(session_id))
+        )
+        range_row = range_result.one_or_none()
+        events_per_minute = 0.0
+        if range_row and range_row.first and range_row.last and total_events > 1:
+            elapsed_seconds = (range_row.last - range_row.first).total_seconds()
+            if elapsed_seconds > 0:
+                events_per_minute = round(total_events / (elapsed_seconds / 60), 2)
+
+    return {
+        "session_id": session_id,
+        "total_events": total_events,
+        "by_severity": by_severity,
+        "by_source": by_source,
+        "top_techniques": top_techniques,
+        "events_per_minute": events_per_minute,
+    }
+
+
 @router.get("/{session_id}/events")
 async def get_session_events(
     session_id: str,

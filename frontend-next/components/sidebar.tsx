@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   Workflow,
   ClipboardCheck,
+  Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/pipeline", label: "Pipeline", icon: Workflow },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/environments", label: "Environments", icon: Server },
+  { href: "/sessions", label: "Sessions", icon: Activity },
   { href: "/rules", label: "Rules", icon: FileText },
   { href: "/use-cases", label: "Use Cases", icon: ClipboardCheck },
   { href: "/threat-intel", label: "Threat Intel", icon: Shield },

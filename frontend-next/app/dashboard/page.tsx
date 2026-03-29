@@ -5,6 +5,7 @@ import { RefreshCw, TrendingUp, TrendingDown, Minus, Activity, Clock, Zap, Alert
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { OnboardingBanner } from '@/components/onboarding-banner'
 import { authFetch } from '@/lib/auth'
 import { API_BASE } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
@@ -263,6 +264,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Onboarding banner — shown until setup is complete */}
+      <OnboardingBanner />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

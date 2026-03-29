@@ -111,6 +111,16 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.warning("LLM router init failed: %s", exc)
 
+    # 5a. Wire Redis into LLM router for response caching
+    try:
+        from backend.llm.router import get_router
+        llm_router = get_router()
+        if hasattr(app.state, "redis") and app.state.redis:
+            llm_router.set_redis(app.state.redis)
+            logger.info("LLM cache wired to Redis")
+    except Exception as exc:
+        logger.warning("LLM cache wiring failed: %s", exc)
+
     # 6. Start pipeline scheduler
     try:
         from backend.pipeline.scheduler import get_scheduler

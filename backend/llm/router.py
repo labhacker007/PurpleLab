@@ -47,6 +47,7 @@ class LLMRouter:
         self._db_available = False
         self._db_checked = False
         self._lock = asyncio.Lock()
+        self._redis_client: Any = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,8 +107,27 @@ class LLMRouter:
         temperature: float | None = None,
         json_mode: bool = False,
     ) -> str:
-        """Convenience: route to correct model and return text only."""
-        client = await self.get_client_async(function)
+        """Convenience: route to correct model and return text only.
+
+        Checks the LLM response cache before calling the provider.
+        Cache misses are stored after a successful provider call.
+        All cache errors are swallowed so they never break LLM calls.
+        """
+        fn = LLMFunction(function) if isinstance(function, str) else function
+
+        # -- 1. Check cache -----------------------------------------------
+        try:
+            from backend.llm.cache import get_llm_cache
+            cache = get_llm_cache(self._redis_client)
+            cached = await cache.get(fn, messages, system or "")
+            if cached is not None:
+                logger.debug("LLM cache HIT fn=%s", fn.value)
+                return cached
+        except Exception as _cache_exc:
+            logger.debug("LLM cache GET failed (continuing): %s", _cache_exc)
+
+        # -- 2. Call provider ---------------------------------------------
+        client = await self.get_client_async(fn)
         resp = await client.complete(
             messages=messages,
             system=system,
@@ -115,7 +135,26 @@ class LLMRouter:
             temperature=temperature,
             json_mode=json_mode,
         )
+
+        # -- 3. Store in cache --------------------------------------------
+        try:
+            from backend.llm.cache import get_llm_cache
+            cache = get_llm_cache(self._redis_client)
+            await cache.set(fn, messages, system or "", resp.text)
+        except Exception as _cache_exc:
+            logger.debug("LLM cache SET failed (continuing): %s", _cache_exc)
+
         return resp.text
+
+    def set_redis(self, redis_client: Any) -> None:
+        """Wire in Redis for response caching. Called on startup."""
+        self._redis_client = redis_client
+        # Also update the cache singleton if it already exists
+        try:
+            from backend.llm.cache import get_llm_cache
+            get_llm_cache(redis_client)
+        except Exception:
+            pass
 
     async def set_config(
         self,
