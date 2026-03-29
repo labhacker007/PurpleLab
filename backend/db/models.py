@@ -489,3 +489,24 @@ class UseCaseRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
 
     use_case: Mapped[UseCase] = relationship("UseCase", back_populates="runs")
+
+
+# ── Reports ───────────────────────────────────────────────────────────────────
+
+class Report(Base):
+    """A generated report (coverage, use_cases, pipeline, or full).
+
+    Stores the computed report data as JSONB and optionally a file path
+    for HTML exports. Status transitions: generating → ready | failed.
+    """
+    __tablename__ = "reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(300))
+    type: Mapped[str] = mapped_column(String(30))  # coverage | use_cases | pipeline | full
+    format: Mapped[str] = mapped_column(String(10), default="json")  # json | html
+    status: Mapped[str] = mapped_column(String(20), default="generating")  # generating | ready | failed
+    data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())

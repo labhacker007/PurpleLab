@@ -106,7 +106,13 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── New Session Dialog ────────────────────────────────────────────────────────
 
-const ATTACK_CHAINS = [
+interface AttackChain {
+  id: string
+  label: string
+  description: string
+}
+
+const FALLBACK_ATTACK_CHAINS: AttackChain[] = [
   { id: 'apt29', label: 'APT29 (Cozy Bear)', description: 'Russian nation-state TTPs' },
   { id: 'apt41', label: 'APT41', description: 'Chinese espionage + financial' },
   { id: 'cloud_takeover', label: 'Cloud Takeover', description: 'AWS/Azure privilege escalation' },
@@ -119,10 +125,14 @@ function NewSessionDialog({
   open,
   onClose,
   onCreated,
+  attackChains,
+  chainsLoading,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (id: string) => void
+  attackChains: AttackChain[]
+  chainsLoading: boolean
 }) {
   const [name, setName] = useState('')
   const [chains, setChains] = useState<string[]>([])
@@ -184,9 +194,12 @@ function NewSessionDialog({
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted uppercase tracking-wide">Attack chains</label>
+          <label className="text-xs font-medium text-muted uppercase tracking-wide flex items-center gap-1.5">
+            Attack chains
+            {chainsLoading && <Loader2 className="h-3 w-3 animate-spin text-muted" />}
+          </label>
           <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-            {ATTACK_CHAINS.map((chain) => {
+            {attackChains.map((chain) => {
               const selected = chains.includes(chain.id)
               return (
                 <button
@@ -246,6 +259,35 @@ export default function SessionsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [attackChains, setAttackChains] = useState<AttackChain[]>(FALLBACK_ATTACK_CHAINS)
+  const [chainsLoading, setChainsLoading] = useState(true)
+
+  // Fetch dynamic attack chains on mount
+  useEffect(() => {
+    async function loadChains() {
+      setChainsLoading(true)
+      try {
+        const res = await authFetch(`${API_BASE}/api/v2/log-sources/attack-chains`)
+        if (res.ok) {
+          const data = (await res.json()) as { chains?: Array<{ id: string; name?: string; description?: string }> }
+          if (data.chains && data.chains.length > 0) {
+            setAttackChains(
+              data.chains.map((c) => ({
+                id: c.id,
+                label: c.name ?? c.id,
+                description: c.description ?? '',
+              }))
+            )
+          }
+        }
+      } catch {
+        // fall back to hardcoded list (already default state)
+      } finally {
+        setChainsLoading(false)
+      }
+    }
+    void loadChains()
+  }, [])
 
   const fetchSessions = useCallback(async () => {
     setIsLoading(true)
@@ -401,6 +443,8 @@ export default function SessionsPage() {
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={handleCreated}
+        attackChains={attackChains}
+        chainsLoading={chainsLoading}
       />
     </div>
   )

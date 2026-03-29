@@ -64,9 +64,9 @@ interface PipelineRun {
   error?: string
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Constants (fallback values used when backend is unreachable) ─────────────
 
-const ATTACK_CHAINS: AttackChain[] = [
+const FALLBACK_ATTACK_CHAINS: AttackChain[] = [
   { id: 'apt29', label: 'APT29 (Cozy Bear)', description: 'Russian nation-state TTPs' },
   { id: 'apt41', label: 'APT41', description: 'Chinese espionage + financial' },
   { id: 'cloud_takeover', label: 'Cloud Takeover', description: 'AWS/Azure privilege escalation' },
@@ -77,7 +77,15 @@ const ATTACK_CHAINS: AttackChain[] = [
   { id: 'persistence', label: 'Persistence Suite', description: 'Registry + scheduled tasks' },
 ]
 
-const SIEM_OPTIONS = ['Splunk Production', 'Elastic SIEM', 'Azure Sentinel', 'IBM QRadar', 'Custom']
+interface SIEMOption { value: string; label: string }
+
+const FALLBACK_SIEM_OPTIONS: SIEMOption[] = [
+  { value: 'Splunk Production', label: 'Splunk Production' },
+  { value: 'Elastic SIEM', label: 'Elastic SIEM' },
+  { value: 'Azure Sentinel', label: 'Azure Sentinel' },
+  { value: 'IBM QRadar', label: 'IBM QRadar' },
+  { value: 'Custom', label: 'Custom' },
+]
 
 // ─── Status badge helpers ─────────────────────────────────────────────────────
 
@@ -159,10 +167,16 @@ function NewPipelineDrawer({
   open,
   onClose,
   onCreated,
+  attackChains,
+  siemOptions,
+  chainsLoading,
 }: {
   open: boolean
   onClose: () => void
   onCreated: () => void
+  attackChains: AttackChain[]
+  siemOptions: SIEMOption[]
+  chainsLoading: boolean
 }) {
   const [form, setForm] = useState<PipelineFormState>(DEFAULT_FORM)
   const [isSaving, setIsSaving] = useState(false)
@@ -276,11 +290,12 @@ function NewPipelineDrawer({
 
         {/* Attack chains */}
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted uppercase tracking-wide">
+          <label className="text-xs font-medium text-muted uppercase tracking-wide flex items-center gap-1.5">
             Attack chains *
+            {chainsLoading && <Loader2 className="h-3 w-3 animate-spin text-muted" />}
           </label>
           <div className="space-y-1.5">
-            {ATTACK_CHAINS.map((chain) => {
+            {attackChains.map((chain) => {
               const selected = form.chains.includes(chain.id)
               return (
                 <button
@@ -327,8 +342,8 @@ function NewPipelineDrawer({
             onChange={(e) => setForm((f) => ({ ...f, siem_connection: e.target.value }))}
           >
             <option value="">— None —</option>
-            {SIEM_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
+            {siemOptions.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
         </div>
@@ -397,11 +412,13 @@ function PipelineCard({
   onRun,
   onDelete,
   running,
+  attackChains,
 }: {
   pipeline: Pipeline
   onRun: (id: string) => void
   onDelete: (id: string) => void
   running: boolean
+  attackChains: AttackChain[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const scheduleLabel =
@@ -445,7 +462,7 @@ function PipelineCard({
             {pipeline.chains.length > 0 && (
               <div className="mt-2.5 flex flex-wrap gap-1.5">
                 {pipeline.chains.map((c) => {
-                  const chain = ATTACK_CHAINS.find((a) => a.id === c)
+                  const chain = attackChains.find((a) => a.id === c)
                   return (
                     <Badge key={c} variant="primary" className="text-[10px]">
                       {chain?.label ?? c}
@@ -518,6 +535,52 @@ export default function PipelinePage() {
   const [isLoading, setIsLoading] = useState(true)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
+  const [attackChains, setAttackChains] = useState<AttackChain[]>(FALLBACK_ATTACK_CHAINS)
+  const [siemOptions, setSiemOptions] = useState<SIEMOption[]>(FALLBACK_SIEM_OPTIONS)
+  const [chainsLoading, setChainsLoading] = useState(true)
+
+  // Fetch dynamic attack chains and SIEM connections on mount
+  useEffect(() => {
+    async function loadDynamicOptions() {
+      setChainsLoading(true)
+      await Promise.allSettled([
+        (async () => {
+          try {
+            const res = await authFetch(`${API_BASE}/api/v2/log-sources/attack-chains`)
+            if (res.ok) {
+              const data = (await res.json()) as { chains?: Array<{ id: string; name?: string; description?: string }> }
+              if (data.chains && data.chains.length > 0) {
+                setAttackChains(
+                  data.chains.map((c) => ({
+                    id: c.id,
+                    label: c.name ?? c.id,
+                    description: c.description ?? '',
+                  }))
+                )
+              }
+            }
+          } catch {
+            // fall back to hardcoded list (already default state)
+          }
+        })(),
+        (async () => {
+          try {
+            const res = await authFetch(`${API_BASE}/api/v2/siem/connections`)
+            if (res.ok) {
+              const data = (await res.json()) as Array<{ id: string; name: string }>
+              if (data && data.length > 0) {
+                setSiemOptions(data.map((c) => ({ value: c.name, label: c.name })))
+              }
+            }
+          } catch {
+            // fall back to hardcoded list (already default state)
+          }
+        })(),
+      ])
+      setChainsLoading(false)
+    }
+    void loadDynamicOptions()
+  }, [])
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
@@ -644,6 +707,7 @@ export default function PipelinePage() {
               onRun={handleRun}
               onDelete={handleDelete}
               running={runningIds.has(p.id)}
+              attackChains={attackChains}
             />
           ))}
         </div>
@@ -708,6 +772,9 @@ export default function PipelinePage() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onCreated={() => void fetchData()}
+        attackChains={attackChains}
+        siemOptions={siemOptions}
+        chainsLoading={chainsLoading}
       />
     </div>
   )
