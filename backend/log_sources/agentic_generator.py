@@ -250,21 +250,24 @@ async def _call_claude_for_templates(
     prompt: str,
     max_tokens: int = 4096,
 ) -> list[dict[str, Any]]:
-    """Call Claude API and parse the JSON array response."""
-    from anthropic import AsyncAnthropic
-    from backend.config import settings
+    """Call the configured LLM (via router) and parse the JSON array response.
 
-    client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    Routes to whatever provider is configured for LOG_GENERATION:
+    Claude, GPT-4o, Gemini, or a local Ollama model.
+    """
+    from backend.llm.router import get_router
+    from backend.llm.config import LLMFunction
 
-    response = await client.messages.create(
-        model="claude-haiku-4-5-20251001",  # fast + cheap for generation
-        max_tokens=max_tokens,
+    router = get_router()
+    client = await router.get_client_async(LLMFunction.LOG_GENERATION)
+    resp = await client.complete(
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+        json_mode=True,
     )
+    raw = resp.text.strip()
 
-    raw = response.content[0].text.strip()
-
-    # Strip accidental markdown fences
+    # Strip accidental markdown fences (some models still add them)
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -277,7 +280,7 @@ async def _call_claude_for_templates(
             events = [events]
         return events
     except json.JSONDecodeError as exc:
-        logger.error("Claude returned invalid JSON: %s — %s", exc, raw[:300])
+        logger.error("LLM returned invalid JSON for template generation: %s — %s", exc, raw[:300])
         return []
 
 

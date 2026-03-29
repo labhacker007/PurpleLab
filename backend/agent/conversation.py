@@ -217,6 +217,53 @@ class ConversationManager:
 
         return api_messages
 
+    # ── OpenAI Format Conversion ────────────────────────────────────────────
+
+    async def get_openai_messages(
+        self, conversation_id: str
+    ) -> list[dict[str, Any]]:
+        """Convert internal messages to OpenAI chat completion format.
+
+        Note: system message is NOT included here — the caller injects it.
+        Tool call/result pairs are converted to OpenAI function_calling format.
+        """
+        raw = await self.get_messages(conversation_id)
+        api_messages: list[dict[str, Any]] = []
+
+        for msg in raw:
+            role = msg["role"]
+            content = msg["content"] or ""
+            tool_calls = msg.get("tool_calls")
+            tool_results = msg.get("tool_results")
+
+            if role == "assistant" and tool_calls:
+                import json as _json
+                oai_msg: dict[str, Any] = {"role": "assistant", "content": content or None}
+                oai_msg["tool_calls"] = [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": _json.dumps(tc["input"], default=str),
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+                api_messages.append(oai_msg)
+            elif role == "user" and tool_results:
+                for tr in tool_results:
+                    api_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tr["tool_use_id"],
+                        "content": tr.get("content", ""),
+                    })
+            else:
+                text = content if isinstance(content, str) else str(content)
+                api_messages.append({"role": role, "content": text})
+
+        return api_messages
+
     # ── Context Window Management ───────────────────────────────────────────
 
     async def trim_to_budget(

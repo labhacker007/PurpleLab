@@ -245,6 +245,27 @@ class GeneratedEvent(Base):
     session: Mapped[SimulationSession] = relationship("SimulationSession", back_populates="events")
 
 
+# ── LLM Model Function Config ────────────────────────────────────────────────
+
+class ModelFunctionConfig(Base):
+    """Admin-configurable LLM model routing — one row per function."""
+    __tablename__ = "model_function_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    function_name: Mapped[str] = mapped_column(String(50), unique=True)  # LLMFunction value
+    provider: Mapped[str] = mapped_column(String(20))                    # LLMProvider value
+    model_id: Mapped[str] = mapped_column(String(100))
+    temperature: Mapped[float] = mapped_column(Float, default=0.3)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=4096)
+    base_url: Mapped[str] = mapped_column(String(500), default="")       # Ollama / Azure
+    api_key_override: Mapped[str] = mapped_column(Text, default="")      # Encrypted if set
+    extra_params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    fallback_config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
 # ── Log Source Schemas ───────────────────────────────────────────────────────
 
 class LogSourceSchema(Base):

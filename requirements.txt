@@ -1,39 +1,45 @@
-# Existing
+# ── Web Framework ─────────────────────────────────────────────────────────────
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
 httpx>=0.28.0
 apscheduler>=3.11.0
 pydantic>=2.10.0
+pydantic-settings>=2.7.0
 python-dateutil>=2.9.0
 faker>=33.0.0
+python-multipart>=0.0.9
 
-# New - Database
+# ── Database ──────────────────────────────────────────────────────────────────
 sqlalchemy[asyncio]>=2.0.36
 asyncpg>=0.30.0
 alembic>=1.14.0
 
-# New - Settings
-pydantic-settings>=2.7.0
-
-# New - Cache & Queue
+# ── Cache & Queue ─────────────────────────────────────────────────────────────
 redis>=5.2.0
 celery>=5.4.0
 
-# New - AI/LLM
-anthropic>=0.45.0
-openai>=1.60.0
+# ── AI / LLM — Frontier Models ────────────────────────────────────────────────
+anthropic>=0.45.0          # Claude (Anthropic)
+openai>=1.60.0             # GPT-4o / o1 (OpenAI) + OpenAI-compat (Gemini, Ollama, Azure)
+google-generativeai>=0.8.0 # Google Gemini native SDK (for embeddings)
+# Note: Ollama uses OpenAI-compat endpoint — no extra package needed
+# Note: Azure OpenAI uses openai SDK with custom base_url
 
-# New - Vector DB
+# ── Vector DB & Embeddings ────────────────────────────────────────────────────
 chromadb>=0.6.0
 
-# New - Threat Intel
+# ── Threat Intel & Detection ──────────────────────────────────────────────────
 mitreattack-python>=4.0.0
 pysigma>=0.11.0
 beautifulsoup4>=4.12.0
+pyyaml>=6.0.2
 
-# New - Security
+# ── Security ──────────────────────────────────────────────────────────────────
 cryptography>=44.0.0
 
-# New - WebSocket
+# ── Real-time ─────────────────────────────────────────────────────────────────
 websockets>=14.0
 python-socketio>=5.11.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tenacity>=9.0.0            # Retry logic with exponential backoff

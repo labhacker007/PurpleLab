@@ -41,7 +41,18 @@ class Settings(BaseSettings):
     JOTI_API_KEY: str = ""               # "joti_<64 hex chars>"
     JOTI_WEBHOOK_TOKEN: str = ""         # For alert ingestion endpoint
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # LLM Provider Keys
+    GOOGLE_API_KEY: str = ""             # Google Gemini
+    AZURE_OPENAI_API_KEY: str = ""       # Azure OpenAI
+    AZURE_OPENAI_ENDPOINT: str = ""      # e.g. "https://myresource.openai.azure.com"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"  # Local Ollama instance
+
+    # Per-function LLM model overrides (optional env-var config)
+    # Format: PURPLELAB_LLM_{FUNCTION}_{FIELD}
+    # e.g. PURPLELAB_LLM_LOG_GENERATION_PROVIDER=ollama
+    #      PURPLELAB_LLM_LOG_GENERATION_MODEL=llama3.2
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "allow"}
 
 
 settings = Settings()
