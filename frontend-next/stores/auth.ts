@@ -7,6 +7,7 @@ import {
   clearTokens,
   getStoredUser,
   getAccessToken,
+  getRefreshToken,
   login as authLogin,
   register as authRegister,
   logout as authLogout,
@@ -43,7 +44,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       // Update stored user in case it changed
       const storedTokens = {
         access_token: token,
-        refresh_token: localStorage.getItem('pl_refresh_token') ?? '',
+        refresh_token: getRefreshToken() ?? '',
         token_type: 'bearer',
         user,
       }

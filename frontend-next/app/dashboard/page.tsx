@@ -115,7 +115,7 @@ function KpiCard({
               </p>
             )}
           </div>
-          <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', accent ? `bg-current/10` : 'bg-border/50')}>
+          <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg bg-border/50')}>
             <Icon className={cn('h-4 w-4', accent ?? 'text-muted')} />
           </div>
         </div>
