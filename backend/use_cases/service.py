@@ -258,7 +258,30 @@ class UseCaseService:
 
                 await db.commit()
                 await db.refresh(run)
-                return _run_to_dict(run)
+                run_dict = _run_to_dict(run)
+
+            # Send in-app notification to the triggering user (non-fatal)
+            if triggered_by and triggered_by not in ("scheduler",):
+                try:
+                    from backend.api.v2.notifications import send_notification
+                    status_label = result.get("status", "completed")
+                    pass_rate = result.get("pass_rate")
+                    if pass_rate is not None:
+                        detail = f"Pass rate: {pass_rate * 100:.0f}%"
+                    else:
+                        detail = f"Status: {status_label}"
+                    notif_type = "success" if status_label == "passed" else "warning"
+                    await send_notification(
+                        user_id=triggered_by,
+                        notif_type=notif_type,
+                        title="Use Case Run Complete",
+                        message=detail,
+                        link="/use-cases",
+                    )
+                except Exception as notif_exc:
+                    logger.debug("Use case notification failed (non-fatal): %s", notif_exc)
+
+            return run_dict
 
         except Exception as exc:
             logger.exception("Use case run failed for %s: %s", use_case_id, exc)

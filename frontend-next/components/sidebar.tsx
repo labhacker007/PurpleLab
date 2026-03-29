@@ -16,6 +16,7 @@ import {
   ClipboardCheck,
   Activity,
   ShieldCheck,
+  BookOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -30,6 +31,7 @@ const navItems = [
   { href: "/rules", label: "Rules", icon: FileText },
   { href: "/use-cases", label: "Use Cases", icon: ClipboardCheck },
   { href: "/threat-intel", label: "Threat Intel", icon: Shield },
+  { href: "/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },
 ]

@@ -491,6 +491,28 @@ class UseCaseRun(Base):
     use_case: Mapped[UseCase] = relationship("UseCase", back_populates="runs")
 
 
+# ── Knowledge Base ───────────────────────────────────────────────────────────
+
+class KnowledgeDocument(Base):
+    """A document stored in the knowledge base for agent retrieval.
+
+    Supports procedures, playbooks, runbooks, techniques, and custom content.
+    Embeddings are stored in ChromaDB; status tracks indexing lifecycle.
+    """
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(500))
+    content: Mapped[str] = mapped_column(Text, default="")
+    doc_type: Mapped[str] = mapped_column(String(50), default="custom")  # procedure/playbook/runbook/technique/custom
+    tags: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)   # list of tag strings
+    source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    embedding_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/indexed/failed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
 # ── Reports ───────────────────────────────────────────────────────────────────
 
 class Report(Base):

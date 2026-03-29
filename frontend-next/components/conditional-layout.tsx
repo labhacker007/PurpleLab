@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation'
 import { Sidebar } from '@/components/sidebar'
 import { UserMenu } from '@/components/user-menu'
+import { NotificationBell } from '@/components/notification-bell'
 
 const AUTH_PATHS = ['/login', '/register']
 // Onboarding is full-screen — renders its own layout
@@ -46,6 +47,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
           <div className="flex-1" />
           <div className="flex items-center gap-3">
             <span className="hidden md:block text-xs text-muted">Security Product Simulator</span>
+            <NotificationBell />
             <UserMenu />
           </div>
         </header>

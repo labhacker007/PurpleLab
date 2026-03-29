@@ -336,19 +336,19 @@ async def trigger_run(pipeline_id: str, body: RunNowRequest) -> dict[str, Any]:
 
     run_id = str(run.id)
 
-    # Fire pipeline execution as a background task
-    async def _execute() -> None:
-        from backend.pipeline.engine import get_pipeline_engine
-        engine = await get_pipeline_engine()
-        await engine.run_pipeline(pipeline_id, triggered_by=body.triggered_by)
+    # Dispatch pipeline execution to Celery
+    from backend.tasks.pipeline_tasks import run_pipeline_task
+    task = run_pipeline_task.delay(pipeline_id, triggered_by=body.triggered_by)
 
-    asyncio.create_task(_execute())
-
-    logger.info("Triggered immediate run for pipeline %s (run_id=%s)", pipeline_id, run_id)
+    logger.info(
+        "Triggered immediate run for pipeline %s (run_id=%s, task_id=%s)",
+        pipeline_id, run_id, task.id,
+    )
     return {
         "run_id": run_id,
         "pipeline_id": pipeline_id,
-        "status": "pending",
+        "status": "queued",
+        "task_id": task.id,
         "triggered_by": body.triggered_by,
     }
 

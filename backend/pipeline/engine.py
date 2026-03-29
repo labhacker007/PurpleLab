@@ -195,6 +195,12 @@ class PipelineEngine:
         if all_events:
             asyncio.create_task(self._notify_joti(all_events))
 
+        # Push in-app notification to the triggering user
+        if triggered_by and triggered_by not in ("scheduler", "pipeline"):
+            asyncio.create_task(
+                self._notify_user(triggered_by, des_before, des_after)
+            )
+
         # ── 9. Update PipelineRun ──────────────────────────────────────
         await self._update_run(
             run_id,
@@ -596,6 +602,31 @@ class PipelineEngine:
                     )
             except Exception as exc:
                 logger.warning("Slack webhook notify failed: %s", exc)
+
+    async def _notify_user(
+        self,
+        user_id: str,
+        des_before: float | None,
+        des_after: float | None,
+    ) -> None:
+        """Send in-app notification to the user who triggered the pipeline run."""
+        try:
+            from backend.api.v2.notifications import send_notification
+
+            if des_before is not None and des_after is not None:
+                msg = f"Run finished: DES {des_before * 100:.0f}% \u2192 {des_after * 100:.0f}%"
+            else:
+                msg = "Pipeline run completed"
+
+            await send_notification(
+                user_id=user_id,
+                notif_type="success",
+                title="Pipeline Complete",
+                message=msg,
+                link="/pipeline",
+            )
+        except Exception as exc:
+            logger.warning("Pipeline user notification failed: %s", exc)
 
     async def _notify_joti(self, events: list[dict[str, Any]]) -> None:
         """Send generated events to Joti as alerts (fire-and-forget)."""

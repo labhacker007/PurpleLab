@@ -5,12 +5,11 @@ for purple team use cases.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -50,24 +49,6 @@ class UseCaseUpdateRequest(BaseModel):
 
 class RunTriggerRequest(BaseModel):
     triggered_by: str = "manual"
-
-
-# ---------------------------------------------------------------------------
-# Background run helper
-# ---------------------------------------------------------------------------
-
-async def _run_use_case_background(use_case_id: str, triggered_by: str) -> None:
-    """Background task: run validation for a single use case."""
-    try:
-        from backend.use_cases.service import UseCaseService
-        svc = UseCaseService()
-        result = await svc.run_use_case(use_case_id, triggered_by=triggered_by)
-        logger.info(
-            "Use case %s validation complete: status=%s pass_rate=%s",
-            use_case_id, result.get("status"), result.get("pass_rate"),
-        )
-    except Exception as exc:
-        logger.exception("Background use case run failed for %s: %s", use_case_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -124,25 +105,19 @@ async def get_failing_use_cases() -> dict[str, Any]:
 
 @router.post("/run-all")
 async def run_all_use_cases(
-    background_tasks: BackgroundTasks,
     triggered_by: str = Query("manual"),
 ) -> dict[str, Any]:
-    """Trigger validation for all active use cases as background tasks.
+    """Trigger validation for all active use cases via a single Celery task.
 
-    Returns immediately with the count of use cases queued.
+    Returns immediately with task_id to poll for completion.
     """
-    from backend.use_cases.service import UseCaseService
-    svc = UseCaseService()
-    active = await svc.list_use_cases(active_only=True, limit=500)
+    from backend.tasks.use_case_tasks import run_all_use_cases_task
 
-    for uc in active:
-        background_tasks.add_task(
-            _run_use_case_background, uc["id"], triggered_by
-        )
-
+    task = run_all_use_cases_task.delay(triggered_by=triggered_by)
     return {
-        "queued": len(active),
-        "message": f"Validation queued for {len(active)} active use cases",
+        "status": "queued",
+        "task_id": task.id,
+        "message": "Validation for all active use cases has been queued",
     }
 
 
@@ -185,19 +160,15 @@ async def delete_use_case(use_case_id: str) -> dict[str, Any]:
 @router.post("/{use_case_id}/run")
 async def run_use_case(
     use_case_id: str,
-    background_tasks: BackgroundTasks,
     body: RunTriggerRequest = RunTriggerRequest(),
 ) -> dict[str, Any]:
-    """Trigger a validation run for a use case.
+    """Trigger a validation run for a use case via Celery.
 
-    Starts the validation asynchronously and returns immediately with a run_id.
-    Poll GET /use-cases/{id}/runs to check status.
+    Returns immediately with task_id. Poll GET /tasks/{task_id} for status.
     """
-    from backend.use_cases.service import UseCaseService
     from backend.db.session import async_session
     from backend.db import models
-    from sqlalchemy import select
-    from datetime import datetime, timezone
+    from backend.tasks.use_case_tasks import run_use_case_task
 
     # Verify use case exists first
     async with async_session() as db:
@@ -205,7 +176,7 @@ async def run_use_case(
         if not uc:
             raise HTTPException(status_code=404, detail=f"Use case {use_case_id} not found")
 
-        # Create the run record synchronously so we can return a run_id
+        # Create a pending run record so callers can track via run history
         run = models.UseCaseRun(
             use_case_id=uc.id,
             status="pending",
@@ -216,15 +187,13 @@ async def run_use_case(
         await db.refresh(run)
         run_id = str(run.id)
 
-    background_tasks.add_task(
-        _run_use_case_background, use_case_id, body.triggered_by
-    )
+    task = run_use_case_task.delay(use_case_id, triggered_by=body.triggered_by)
 
     return {
         "run_id": run_id,
         "use_case_id": use_case_id,
-        "status": "pending",
-        "message": "Validation run queued",
+        "status": "queued",
+        "task_id": task.id,
     }
 
 
