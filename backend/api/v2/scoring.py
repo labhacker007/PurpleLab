@@ -152,26 +152,50 @@ async def get_ihds_score() -> dict[str, Any]:
                 )
             )
 
-    # ── Pull Joti HCCS if configured ─────────────────────────────────
+    # ── Pull Joti HCCS + TES if configured ───────────────────────────
     joti_hunt_score: float | None = None
     joti_hccs_data: dict[str, Any] = {}
+    joti_tes_data: dict[str, Any] = {}
     joti_gaps: list[dict[str, Any]] = []
+    joti_connected: bool = False
     try:
-        from backend.integrations.joti_client import get_joti_client
+        from backend.joti import get_joti_client
         joti_client = get_joti_client()
         if joti_client:
-            async with joti_client as client:
-                hccs = await client.get_hccs()
-                if hccs:
-                    joti_hunt_score = hccs.score
+            # Check connectivity first (fast health ping)
+            joti_connected = await joti_client.is_connected()
+            if joti_connected:
+                # HCCS — Hunt Coverage Completeness Score
+                hccs_raw = await joti_client.get_coverage_score()
+                if hccs_raw:
+                    raw_score = hccs_raw.get("score", 0.0)
+                    # Joti returns 0-100; IHDS expects 0.0-100.0, same scale
+                    joti_hunt_score = float(raw_score)
                     joti_hccs_data = {
-                        "score": hccs.score,
-                        "covered_techniques": hccs.covered_techniques,
-                        "total_techniques": hccs.total_techniques,
-                        "computed_at": hccs.computed_at,
+                        "score": joti_hunt_score,
+                        "covered_techniques": hccs_raw.get("covered_techniques", 0),
+                        "total_techniques": hccs_raw.get("total_techniques", 0),
+                        "computed_at": hccs_raw.get("computed_at", ""),
                     }
-                raw_gaps = await client.get_hunt_gaps()
-                joti_gaps = raw_gaps or []
+                # TES — Threat Exposure Score
+                tes_raw = await joti_client.get_threat_profile()
+                if tes_raw:
+                    joti_tes_data = {
+                        "score": float(tes_raw.get("score", 0.0)),
+                        "components": tes_raw.get("components", {}),
+                        "computed_at": tes_raw.get("computed_at", ""),
+                    }
+                # Active alerts as hunt gaps proxy
+                active_alerts = await joti_client.get_active_alerts(limit=20)
+                joti_gaps = [
+                    {
+                        "technique_id": a.get("technique_id") or a.get("mitre_technique"),
+                        "severity": a.get("severity", "medium"),
+                        "title": a.get("title", ""),
+                    }
+                    for a in active_alerts
+                    if a.get("technique_id") or a.get("mitre_technique")
+                ]
     except Exception as exc:
         logger.debug("Joti IHDS data pull failed (non-fatal): %s", exc)
 
@@ -205,8 +229,10 @@ async def get_ihds_score() -> dict[str, Any]:
         "intel_techniques": ihds.intel_technique_count,
         "hunted_techniques": ihds.hunted_technique_count,
         "detected_techniques": ihds.detected_technique_count,
+        "joti_connected": joti_connected,
         "joti_hunt_score_used": ihds.joti_hunt_score_used,
         "joti_hccs": joti_hccs_data if joti_hccs_data else None,
+        "joti_tes": joti_tes_data if joti_tes_data else None,
         "ihds_interpretation": ihds.to_dict().get("interpretation", ""),
         "gaps": {
             "local_uncovered": local_gap_techniques[:50],  # cap for response size

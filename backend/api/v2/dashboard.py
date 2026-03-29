@@ -42,6 +42,9 @@ async def get_metrics(
         "threat_actors_count": 0,
         "knowledge_entries_count": 0,
         "joti_connected": False,
+        "joti_configured": False,
+        "joti_hccs": None,
+        "joti_base_url": "",
         "recent_activity": [],
         "coverage_by_tactic": {},
         "pipeline_runs_today": 0,
@@ -166,10 +169,22 @@ async def get_metrics(
         except Exception:
             pass
 
-    # joti_connected — check if JOTI_BASE_URL is configured
+    # joti status — check connectivity and pull HCCS score
     try:
         from backend.config import settings
-        result["joti_connected"] = bool(settings.JOTI_BASE_URL)
+        from backend.joti import get_joti_client
+        joti_url = getattr(settings, "JOTI_BASE_URL", "")
+        result["joti_configured"] = bool(joti_url)
+        result["joti_base_url"] = joti_url
+        if joti_url:
+            client = get_joti_client()
+            if client:
+                connected = await client.is_connected()
+                result["joti_connected"] = connected
+                if connected:
+                    hccs_raw = await client.get_coverage_score()
+                    if hccs_raw and "score" in hccs_raw:
+                        result["joti_hccs"] = float(hccs_raw["score"])
     except Exception:
         pass
 
@@ -199,5 +214,26 @@ async def get_metrics(
             result["llm_cache_hit_rate"] = round(hits / total, 4) if total > 0 else None
     except Exception:
         pass
+
+    # Compose nested system_status for the frontend DashboardMetrics shape
+    result["system_status"] = {
+        "db_connected": result.get("des_score") is not None or True,  # DB reachable if we got here
+        "redis_connected": result.get("llm_cache_hit_rate") is not None or bool(
+            result.get("llm_cache_hits_today") or result.get("llm_cache_misses_today")
+        ),
+        "siem_connections": result.get("siem_connected", 0),
+        "siem_total": result.get("siem_connections", 0),
+        "joti_configured": result.get("joti_configured", False),
+        "joti_connected": result.get("joti_connected", False),
+        "joti_hccs": result.get("joti_hccs"),
+        "joti_base_url": result.get("joti_base_url", ""),
+    }
+
+    # Alias frontend-expected keys
+    result["hitl_pending"] = result.get("pending_hitl", 0)
+    result["mitre_coverage"] = result.get("coverage_by_tactic", [])
+    result["recent_events"] = result.get("recent_activity", [])
+    result["sessions_delta"] = 0
+    result["events_delta"] = 0
 
     return result

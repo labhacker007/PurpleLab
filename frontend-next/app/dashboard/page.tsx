@@ -34,6 +34,8 @@ interface SystemStatus {
   siem_total: number
   joti_configured: boolean
   joti_connected: boolean
+  joti_hccs?: number | null
+  joti_base_url?: string
 }
 
 interface DashboardMetrics {
@@ -419,13 +421,32 @@ export default function DashboardPage() {
                 <StatusDot ok={m.system_status.joti_connected} />
                 <span className="text-sm text-text">Joti Integration</span>
               </div>
-              {m.system_status.joti_configured ? (
-                <Badge variant={m.system_status.joti_connected ? 'success' : 'destructive'} className="text-[10px]">
-                  {m.system_status.joti_connected ? 'connected' : 'error'}
-                </Badge>
-              ) : (
-                <Badge variant="default" className="text-[10px]">not configured</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {m.system_status.joti_configured ? (
+                  <>
+                    <Badge variant={m.system_status.joti_connected ? 'success' : 'destructive'} className="text-[10px]">
+                      {m.system_status.joti_connected ? 'connected' : 'error'}
+                    </Badge>
+                    {m.system_status.joti_connected && m.system_status.joti_hccs != null && (
+                      <span className="text-[10px] font-medium text-primary">
+                        HCCS {m.system_status.joti_hccs.toFixed(1)}
+                      </span>
+                    )}
+                    {m.system_status.joti_base_url && (
+                      <a
+                        href={m.system_status.joti_base_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-muted hover:text-primary underline underline-offset-2 transition-colors"
+                      >
+                        View in Joti
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <Badge variant="default" className="text-[10px]">not configured</Badge>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -468,6 +489,8 @@ function getMockMetrics(): DashboardMetrics {
       siem_total: 3,
       joti_configured: true,
       joti_connected: true,
+      joti_hccs: 72.4,
+      joti_base_url: 'https://joti.example.com',
     },
   }
 }

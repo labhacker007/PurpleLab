@@ -15,6 +15,7 @@ import {
   Workflow,
   ClipboardCheck,
   Activity,
+  ShieldCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -80,6 +81,22 @@ export function Sidebar() {
             </Link>
           )
         })}
+
+        {/* Admin link — only visible to admin role */}
+        {user?.role === "admin" && (
+          <Link
+            href="/admin"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              pathname === "/admin" || pathname.startsWith("/admin/")
+                ? "bg-violet-500/10 text-violet-400"
+                : "text-muted hover:text-text hover:bg-bg"
+            )}
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0" />
+            {!sidebarCollapsed && <span>Admin</span>}
+          </Link>
+        )}
       </nav>
 
       {/* User info */}

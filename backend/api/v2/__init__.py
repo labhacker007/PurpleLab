@@ -21,6 +21,7 @@ from backend.api.v2.pipeline import router as pipeline_router
 from backend.api.v2.scoring import router as scoring_router
 from backend.api.v2.use_cases import router as use_cases_router
 from backend.api.v2.reports import router as reports_router
+from backend.joti.webhook import router as joti_webhook_router
 
 v2_router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -67,3 +68,4 @@ v2_router.include_router(pipeline_router)
 v2_router.include_router(scoring_router)
 v2_router.include_router(use_cases_router)
 v2_router.include_router(reports_router)
+v2_router.include_router(joti_webhook_router)
