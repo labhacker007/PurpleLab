@@ -1,50 +1,15 @@
 version: "3.9"
 
-services:
-  purplelab:
-    build: .
-    container_name: purplelab-api
-    ports:
-      - "4000:4000"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-claude-sonnet-4-20250514}
-      - DEBUG=${DEBUG:-true}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
-      - CHROMA_PERSIST_DIR=/app/data/chroma
-    volumes:
-      - ./backend:/app/backend
-      - ./frontend:/app/frontend
-      - ./scripts:/app/scripts
-      - ./tests:/app/tests
-      - ./data:/app/data
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
-    command: python -m uvicorn backend.main:app --host 0.0.0.0 --port 4000 --reload
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:4000/api/catalog"]
-      interval: 15s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
-    restart: unless-stopped
-    networks:
-      - default
-      - joti_default
+# ─────────────────────────────────────────────────────────────────────────────
+#  PurpleLab — Production Docker Compose
+#  Services: postgres, redis, backend, celery_worker, celery_beat, frontend
+# ─────────────────────────────────────────────────────────────────────────────
 
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     container_name: purplelab-db
     environment:
       POSTGRES_USER: purplelab
@@ -53,37 +18,179 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U purplelab"]
+      test: ["CMD-SHELL", "pg_isready -U purplelab -d purplelab"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
     restart: unless-stopped
+    networks:
+      - purplelab
 
+  # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
-    image: redis:7.4-alpine
+    image: redis:7-alpine
     container_name: purplelab-redis
-    ports:
-      - "${REDIS_PORT:-6380}:6379"
-    volumes:
-      - redisdata:/data
     command: >
       redis-server
       --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - purplelab
+
+  # ── Backend (FastAPI) ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: purplelab-backend
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CHROMA_PERSIST_DIR: /app/data/chroma
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 45s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+    networks:
+      - purplelab
+      - joti_default
 
+  # ── Celery Worker ───────────────────────────────────────────────────────────
+  celery_worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: purplelab-worker
+    command: celery -A backend.celery_app worker --loglevel=info --concurrency=2
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CHROMA_PERSIST_DIR: /app/data/chroma
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 256M
+    networks:
+      - purplelab
+
+  # ── Celery Beat (Scheduler) ─────────────────────────────────────────────────
+  celery_beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: purplelab-beat
+    command: celery -A backend.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://purplelab:${POSTGRES_PASSWORD:-purplelab}@postgres:5432/purplelab
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - purplelab
+
+  # ── Frontend (Next.js) ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:8000}
+    container_name: purplelab-frontend
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    networks:
+      - purplelab
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
-  pgdata:
-  redisdata:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  chroma_data:
+    driver: local
 
+# ── Networks ──────────────────────────────────────────────────────────────────
 networks:
+  purplelab:
+    driver: bridge
   joti_default:
     external: true

@@ -1,0 +1,67 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.coverage
+htmlcov/
+.tox/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env/
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+.next/
+frontend-next/.next/
+frontend-next/node_modules/
+*.tsbuildinfo
+
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+# .env.example is intentionally NOT ignored
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Docs (keep README) ────────────────────────────────────────────────────────
+*.md
+!README.md
+docs/
+
+# ── Local data (ChromaDB, MITRE, Sigma) ───────────────────────────────────────
+data/
+
+# ── IDE & OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+tests/
+pytest.ini
+.pytest.ini
+
+# ── Scripts (not needed in image) ────────────────────────────────────────────
+scripts/
+purplelab.sh

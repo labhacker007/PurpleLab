@@ -15,15 +15,18 @@ import {
   FileText,
   RefreshCw,
   X,
-  Link,
+  Download,
+  ShieldCheck,
+  Tag,
+  BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Drawer } from '@/components/ui/Drawer'
-import { apiGet, apiPost, apiDelete } from '@/lib/api/client'
+import { apiGet, apiPost, apiDelete, API_BASE } from '@/lib/api/client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RuleLanguage = 'sigma' | 'spl' | 'kql' | 'esql'
+type RuleLanguage = 'sigma' | 'spl' | 'kql' | 'esql' | 'yara_l'
 type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
 interface MitreTechnique {
@@ -38,11 +41,14 @@ interface DetectionRule {
   language: RuleLanguage
   severity: Severity
   techniques: MitreTechnique[]
+  mitre_techniques?: string[]
+  tags?: string[]
   enabled: boolean
-  source: string
+  source?: string
+  raw_text?: string
   description?: string
   created_at: string
-  updated_at: string
+  updated_at?: string
 }
 
 interface TestResult {
@@ -60,13 +66,27 @@ interface CoverageCell {
   coverage: number // 0–100
 }
 
+interface ValidateResult {
+  results: Array<{
+    rule_id?: string
+    index?: number
+    name?: string
+    valid: boolean
+    errors: string[]
+    warnings: string[]
+  }>
+  valid: number
+  invalid: number
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const LANGUAGE_STYLES: Record<RuleLanguage, string> = {
+const LANGUAGE_STYLES: Record<string, string> = {
   sigma: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
   spl: 'bg-orange-500/15 text-orange-300 border border-orange-500/30',
   kql: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
   esql: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+  yara_l: 'bg-pink-500/15 text-pink-300 border border-pink-500/30',
 }
 
 const SEVERITY_STYLES: Record<Severity, string> = {
@@ -78,9 +98,203 @@ const SEVERITY_STYLES: Record<Severity, string> = {
 }
 
 const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
-const LANGUAGES: RuleLanguage[] = ['sigma', 'spl', 'kql', 'esql']
+const LANGUAGES: RuleLanguage[] = ['sigma', 'spl', 'kql', 'esql', 'yara_l']
 
 const PAGE_SIZE = 20
+
+// ─── Sigma Library starters ───────────────────────────────────────────────────
+
+const SIGMA_LIBRARY = [
+  {
+    key: 'mimikatz',
+    label: 'Mimikatz LSASS Access',
+    severity: 'critical',
+    technique: 'T1003.001',
+    content: `title: Mimikatz LSASS Memory Access
+status: stable
+description: Detects Mimikatz credential dumping via LSASS process access
+logsource:
+  category: process_access
+  product: windows
+detection:
+  selection:
+    TargetImage|endswith: '\\lsass.exe'
+    GrantedAccess|contains:
+      - '0x1010'
+      - '0x1038'
+      - '0x40'
+  condition: selection
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.001`,
+  },
+  {
+    key: 'psexec',
+    label: 'PsExec Remote Execution',
+    severity: 'high',
+    technique: 'T1569.002',
+    content: `title: PsExec Remote Execution
+status: stable
+description: Detects PsExec usage for remote execution
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\\PSEXESVC.exe'
+  selection2:
+    CommandLine|contains: 'psexec'
+  condition: selection or selection2
+level: high
+tags:
+  - attack.execution
+  - attack.lateral_movement
+  - attack.t1569.002`,
+  },
+  {
+    key: 'cred_dump',
+    label: 'Credential Dumping via Registry',
+    severity: 'critical',
+    technique: 'T1003.002',
+    content: `title: Credential Dumping via Registry Hive Extraction
+status: stable
+description: Detects extraction of SAM/SYSTEM/SECURITY registry hives
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains:
+      - 'reg save'
+      - 'reg export'
+    CommandLine|contains:
+      - 'sam'
+      - 'system'
+      - 'security'
+  condition: selection
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.002`,
+  },
+  {
+    key: 'lateral_wmi',
+    label: 'Lateral Movement via WMI',
+    severity: 'high',
+    technique: 'T1021.006',
+    content: `title: Lateral Movement via WMI
+status: stable
+description: Detects lateral movement using Windows Management Instrumentation
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    ParentImage|endswith: '\\WmiPrvSE.exe'
+    Image|endswith:
+      - '\\cmd.exe'
+      - '\\powershell.exe'
+      - '\\wscript.exe'
+  condition: selection
+level: high
+tags:
+  - attack.lateral_movement
+  - attack.t1021.006`,
+  },
+  {
+    key: 'ps_encoded',
+    label: 'PowerShell Encoded Command',
+    severity: 'high',
+    technique: 'T1059.001',
+    content: `title: PowerShell Encoded Command Execution
+status: stable
+description: Detects PowerShell executing base64 encoded commands
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\\powershell.exe'
+    CommandLine|contains:
+      - '-EncodedCommand'
+      - '-enc '
+      - '-ec '
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.defense_evasion
+  - attack.t1059.001`,
+  },
+  {
+    key: 'rdp_brute',
+    label: 'RDP Brute Force',
+    severity: 'medium',
+    technique: 'T1110.001',
+    content: `title: RDP Brute Force Attempt
+status: stable
+description: Detects repeated RDP authentication failures indicative of brute force
+logsource:
+  category: authentication
+  product: windows
+detection:
+  selection:
+    EventID: 4625
+    LogonType: 10
+  condition: selection | count() by IpAddress > 10
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110.001`,
+  },
+  {
+    key: 'dns_tunnel',
+    label: 'DNS Tunneling Detection',
+    severity: 'medium',
+    technique: 'T1071.004',
+    content: `title: DNS Tunneling via Long Subdomain Queries
+status: experimental
+description: Detects potential DNS tunneling via unusually long DNS queries
+logsource:
+  category: dns
+  product: windows
+detection:
+  selection:
+    QueryName|re: '.{50,}'
+    QueryType: 'A'
+  condition: selection
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071.004`,
+  },
+  {
+    key: 'ransomware',
+    label: 'Ransomware Mass File Modification',
+    severity: 'critical',
+    technique: 'T1486',
+    content: `title: Ransomware Mass File Modification
+status: stable
+description: Detects mass file renames or encryption typical of ransomware
+logsource:
+  category: file_event
+  product: windows
+detection:
+  selection:
+    TargetFilename|endswith:
+      - '.locked'
+      - '.encrypted'
+      - '.crypted'
+      - '.enc'
+      - '.ransom'
+  condition: selection | count() by ComputerName > 20
+level: critical
+tags:
+  - attack.impact
+  - attack.t1486`,
+  },
+]
 
 // ─── Seed data (dev fallback) ─────────────────────────────────────────────────
 
@@ -91,11 +305,12 @@ const SEED_RULES: DetectionRule[] = [
     language: 'sigma',
     severity: 'critical',
     techniques: [{ id: 'T1003.001', name: 'LSASS Memory', tactic: 'Credential Access' }],
+    mitre_techniques: ['T1003.001'],
+    tags: ['attack.credential_access', 'attack.t1003.001'],
     enabled: true,
-    source: 'title: Mimikatz\ndetection:\n  selection:\n    EventID: 10\n    TargetImage|contains: lsass.exe',
+    raw_text: 'title: Mimikatz\ndetection:\n  selection:\n    EventID: 10\n    TargetImage|contains: lsass.exe\n  condition: selection',
     description: 'Detects Mimikatz credential dumping via LSASS process access',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   },
   {
     id: '2',
@@ -106,11 +321,12 @@ const SEED_RULES: DetectionRule[] = [
       { id: 'T1059.001', name: 'PowerShell', tactic: 'Execution' },
       { id: 'T1027', name: 'Obfuscated Files', tactic: 'Defense Evasion' },
     ],
+    mitre_techniques: ['T1059.001', 'T1027'],
+    tags: ['attack.execution', 'attack.t1059.001'],
     enabled: true,
-    source: "title: PS Encoded\ndetection:\n  selection:\n    CommandLine|contains: '-EncodedCommand'",
+    raw_text: "title: PS Encoded\ndetection:\n  selection:\n    CommandLine|contains: '-EncodedCommand'\n  condition: selection",
     description: 'Detects PowerShell with encoded command line arguments',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   },
   {
     id: '3',
@@ -118,11 +334,12 @@ const SEED_RULES: DetectionRule[] = [
     language: 'spl',
     severity: 'high',
     techniques: [{ id: 'T1021.001', name: 'Remote Desktop Protocol', tactic: 'Lateral Movement' }],
+    mitre_techniques: ['T1021.001'],
+    tags: [],
     enabled: false,
-    source: 'index=wineventlog EventCode=4624 Logon_Type=10\n| stats count by src_ip, dest_ip, user',
+    raw_text: 'index=wineventlog EventCode=4624 Logon_Type=10\n| stats count by src_ip, dest_ip, user',
     description: 'Detects RDP lateral movement via Windows Event 4624',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   },
   {
     id: '4',
@@ -130,11 +347,12 @@ const SEED_RULES: DetectionRule[] = [
     language: 'kql',
     severity: 'medium',
     techniques: [{ id: 'T1071.004', name: 'DNS', tactic: 'Command and Control' }],
+    mitre_techniques: ['T1071.004'],
+    tags: [],
     enabled: true,
-    source: 'DnsEvents\n| where QueryType == "TXT"\n| where strlen(Name) > 50\n| summarize count() by Name, ClientIP',
+    raw_text: 'DnsEvents\n| where QueryType == "TXT"\n| where strlen(Name) > 50\n| summarize count() by Name, ClientIP',
     description: 'Detects potential DNS tunneling via long TXT record queries',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   },
   {
     id: '5',
@@ -142,22 +360,23 @@ const SEED_RULES: DetectionRule[] = [
     language: 'esql',
     severity: 'critical',
     techniques: [{ id: 'T1486', name: 'Data Encrypted for Impact', tactic: 'Impact' }],
+    mitre_techniques: ['T1486'],
+    tags: ['attack.impact', 'attack.t1486'],
     enabled: true,
-    source: 'FROM logs-endpoint*\n| WHERE event.type == "file" AND file.extension IN ("locked","encrypted","ransom")\n| STATS count = COUNT() BY host.name',
+    raw_text: 'FROM logs-endpoint*\n| WHERE event.type == "file" AND file.extension IN ("locked","encrypted","ransom")\n| STATS count = COUNT() BY host.name',
     description: 'Detects mass file rename indicative of ransomware encryption',
     created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   },
 ]
 
 // ─── Utility components ───────────────────────────────────────────────────────
 
-function LangBadge({ lang }: { lang: RuleLanguage }) {
+function LangBadge({ lang }: { lang: string }) {
   return (
     <span
       className={cn(
         'inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-mono font-medium uppercase',
-        LANGUAGE_STYLES[lang]
+        LANGUAGE_STYLES[lang] ?? 'bg-slate-500/15 text-slate-300 border border-slate-500/30'
       )}
     >
       {lang}
@@ -247,9 +466,124 @@ function CoverageHeatmap({ cells }: { cells: CoverageCell[] }) {
   )
 }
 
+// ─── Batch validate modal ─────────────────────────────────────────────────────
+
+function BatchValidateModal({
+  onClose,
+  ruleIds,
+}: {
+  onClose: () => void
+  ruleIds: string[]
+}) {
+  const [result, setResult] = useState<ValidateResult | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await apiPost<ValidateResult>('/api/v2/rules/validate/batch', {
+          rule_ids: ruleIds,
+        })
+        setResult(data)
+      } catch (err) {
+        setResult({
+          results: [{ valid: false, errors: [err instanceof Error ? err.message : 'Validation failed'], warnings: [] }],
+          valid: 0,
+          invalid: 1,
+        })
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [ruleIds])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-950 shadow-2xl mx-4">
+        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-cyan-400" />
+            <h2 className="text-sm font-semibold text-slate-100">Batch Validation Results</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-sm text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Validating rules…
+            </div>
+          ) : result ? (
+            <>
+              {/* Summary row */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-400">{result.valid}</p>
+                  <p className="text-xs text-emerald-300/70 mt-0.5">Valid</p>
+                </div>
+                <div className="flex-1 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-center">
+                  <p className="text-2xl font-bold text-red-400">{result.invalid}</p>
+                  <p className="text-xs text-red-300/70 mt-0.5">Invalid</p>
+                </div>
+              </div>
+
+              {/* Per-rule list */}
+              {result.results.length > 0 && (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                  {result.results.map((r, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        'rounded-lg border px-3 py-2',
+                        r.valid
+                          ? 'border-emerald-500/20 bg-emerald-500/5'
+                          : 'border-red-500/20 bg-red-500/5'
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        {r.valid ? (
+                          <Check className="h-3 w-3 text-emerald-400 shrink-0" />
+                        ) : (
+                          <X className="h-3 w-3 text-red-400 shrink-0" />
+                        )}
+                        <span className="text-xs text-slate-300 truncate">
+                          {r.name ?? r.rule_id ?? `Rule ${i + 1}`}
+                        </span>
+                      </div>
+                      {r.errors.length > 0 && (
+                        <div className="mt-1 space-y-0.5 pl-5">
+                          {r.errors.map((e, j) => (
+                            <p key={j} className="text-[11px] text-red-300">{e}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+
+        <div className="border-t border-slate-800 px-5 py-3 flex justify-end">
+          <button
+            onClick={onClose}
+            className="rounded-lg bg-slate-800 border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Import drawer content ────────────────────────────────────────────────────
 
-type ImportSource = 'paste' | 'file' | 'siem'
+type ImportTab = 'paste' | 'upload' | 'library'
 
 interface ImportDrawerProps {
   onClose: () => void
@@ -257,36 +591,34 @@ interface ImportDrawerProps {
 }
 
 function ImportDrawerContent({ onClose, onImported }: ImportDrawerProps) {
-  const [source, setSource] = useState<ImportSource>('paste')
+  const [tab, setTab] = useState<ImportTab>('paste')
   const [text, setText] = useState('')
-  const [detectedLang, setDetectedLang] = useState<RuleLanguage | null>(null)
+  const [detectedLang, setDetectedLang] = useState<string | null>(null)
   const [detecting, setDetecting] = useState(false)
-  const [preview, setPreview] = useState<Partial<DetectionRule> | null>(null)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [importCount, setImportCount] = useState<number | null>(null)
+
+  // Upload tab
   const fileRef = useRef<HTMLInputElement>(null)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadDrag, setUploadDrag] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  // Library tab
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   async function detectLanguage(content: string) {
     if (!content.trim()) return
     setDetecting(true)
     try {
-      const res = await apiPost<{ language: RuleLanguage; preview: Partial<DetectionRule> }>(
-        '/api/v2/rules/detect-language',
-        { content }
-      )
+      const res = await apiPost<{ language: string }>('/api/v2/rules/detect-language', { content })
       setDetectedLang(res.language)
-      setPreview(res.preview)
     } catch {
-      // Heuristic fallback
-      if (content.includes('title:') && content.includes('detection:')) {
-        setDetectedLang('sigma')
-      } else if (content.toLowerCase().includes('index=') || content.toLowerCase().includes('sourcetype')) {
-        setDetectedLang('spl')
-      } else if (content.includes('| where') || content.includes('summarize')) {
-        setDetectedLang('kql')
-      } else if (content.toUpperCase().includes('FROM ') && content.includes('|')) {
-        setDetectedLang('esql')
-      }
+      if (content.includes('title:') && content.includes('detection:')) setDetectedLang('sigma')
+      else if (content.toLowerCase().includes('index=')) setDetectedLang('spl')
+      else if (content.includes('| where') || content.includes('summarize')) setDetectedLang('kql')
+      else if (content.toUpperCase().includes('FROM ') && content.includes('|')) setDetectedLang('esql')
     } finally {
       setDetecting(false)
     }
@@ -295,34 +627,102 @@ function ImportDrawerContent({ onClose, onImported }: ImportDrawerProps) {
   function handleTextChange(v: string) {
     setText(v)
     if (v.length > 20) {
-      const timeout = setTimeout(() => void detectLanguage(v), 600)
-      return () => clearTimeout(timeout)
+      const t = setTimeout(() => void detectLanguage(v), 600)
+      return () => clearTimeout(t)
     }
   }
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const content = ev.target?.result as string
-      setText(content)
-      void detectLanguage(content)
-    }
-    reader.readAsText(file)
-  }
-
-  async function handleImport() {
+  async function handlePasteImport() {
     if (!text.trim()) return
     setImporting(true)
     setError(null)
+    setImportCount(null)
     try {
-      await apiPost('/api/v2/rules/import', {
-        content: text,
-        language: detectedLang,
+      // Use bulk import endpoint so --- separators work
+      const sections = text.split(/\n---\n|\n---$/).filter((s) => s.trim())
+      const res = await apiPost<{ imported: number; failed: Array<{ index: number; error: string }> }>(
+        '/api/v2/rules/import/bulk',
+        { rules: sections.map((content) => ({ content, format: detectedLang ?? 'auto' })) }
+      )
+      setImportCount(res.imported)
+      if (res.imported > 0) {
+        onImported()
+        setTimeout(onClose, 1200)
+      } else {
+        setError(`All ${res.failed.length} rules failed. First error: ${res.failed[0]?.error}`)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  function handleFileDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setUploadDrag(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) setUploadFile(file)
+  }
+
+  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) setUploadFile(file)
+  }
+
+  async function handleFileUpload() {
+    if (!uploadFile) return
+    setUploading(true)
+    setError(null)
+    setImportCount(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadFile)
+      const resp = await fetch(`${API_BASE}/api/v2/rules/import/file`, {
+        method: 'POST',
+        body: formData,
       })
-      onImported()
-      onClose()
+      if (!resp.ok) {
+        const body = (await resp.json()) as { detail?: string }
+        throw new Error(body.detail ?? 'Upload failed')
+      }
+      const result = (await resp.json()) as { imported: number; total: number }
+      setImportCount(result.imported)
+      if (result.imported > 0) {
+        onImported()
+        setTimeout(onClose, 1200)
+      } else {
+        setError(`No rules imported out of ${result.total} sections`)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleLibraryImport() {
+    if (selected.size === 0) return
+    setImporting(true)
+    setError(null)
+    setImportCount(null)
+    try {
+      const rules = SIGMA_LIBRARY.filter((r) => selected.has(r.key)).map((r) => ({
+        name: r.label,
+        content: r.content,
+        format: 'sigma',
+      }))
+      const res = await apiPost<{ imported: number; failed: Array<{ index: number; error: string }> }>(
+        '/api/v2/rules/import/bulk',
+        { rules }
+      )
+      setImportCount(res.imported)
+      if (res.imported > 0) {
+        onImported()
+        setTimeout(onClose, 1200)
+      } else {
+        setError('Import failed for all selected rules')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -332,21 +732,21 @@ function ImportDrawerContent({ onClose, onImported }: ImportDrawerProps) {
 
   return (
     <div className="p-5 space-y-5">
-      {/* Source tabs */}
+      {/* Tab bar */}
       <div className="flex rounded-lg border border-slate-700 overflow-hidden">
         {(
           [
-            { key: 'paste', label: 'Paste Text', icon: FileText },
-            { key: 'file', label: 'Upload File', icon: Upload },
-            { key: 'siem', label: 'From SIEM', icon: Link },
+            { key: 'paste', label: 'Paste', icon: FileText },
+            { key: 'upload', label: 'Upload File', icon: Upload },
+            { key: 'library', label: 'Sigma Library', icon: BookOpen },
           ] as const
         ).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => setSource(key)}
+            onClick={() => setTab(key)}
             className={cn(
               'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors',
-              source === key
+              tab === key
                 ? 'bg-cyan-600/20 text-cyan-400 border-b-2 border-cyan-500'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             )}
@@ -357,88 +757,141 @@ function ImportDrawerContent({ onClose, onImported }: ImportDrawerProps) {
         ))}
       </div>
 
-      {/* Paste text */}
-      {source === 'paste' && (
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-slate-400">Rule Content</label>
+      {/* ── Paste tab ── */}
+      {tab === 'paste' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-slate-400">Rule Content</label>
+            <span className="text-[11px] text-slate-600">Separate multiple rules with ---</span>
+          </div>
           <textarea
             value={text}
             onChange={(e) => handleTextChange(e.target.value)}
-            placeholder="Paste your Sigma, SPL, KQL, or ES|QL rule here…"
-            rows={10}
+            placeholder={`Paste one or more Sigma / SPL / KQL / ES|QL rules here…\n\nSeparate multiple rules with:\n---`}
+            rows={12}
             className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-mono text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 resize-none"
           />
-        </div>
-      )}
-
-      {/* Upload file */}
-      {source === 'file' && (
-        <div
-          className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-700 p-8 cursor-pointer hover:border-cyan-500/50 transition-colors"
-          onClick={() => fileRef.current?.click()}
-        >
-          <Upload className="h-8 w-8 text-slate-500 mb-2" />
-          <p className="text-sm text-slate-400">Drop a rule file or click to browse</p>
-          <p className="text-xs text-slate-600 mt-1">.yml, .yaml, .spl, .kql, .esql</p>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".yml,.yaml,.spl,.kql,.esql,.txt"
-            onChange={handleFile}
-            className="hidden"
-          />
-          {text && (
-            <div className="mt-3 text-xs text-emerald-400 flex items-center gap-1">
-              <Check className="h-3 w-3" />
-              File loaded ({text.length} chars)
+          {(detecting || detectedLang) && (
+            <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
+              {detecting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-400" />
+              ) : (
+                <Check className="h-3.5 w-3.5 text-emerald-400" />
+              )}
+              <span className="text-xs text-slate-400">
+                {detecting ? 'Detecting language…' : 'Detected:'}
+              </span>
+              {detectedLang && !detecting && <LangBadge lang={detectedLang} />}
             </div>
           )}
         </div>
       )}
 
-      {/* SIEM connection */}
-      {source === 'siem' && (
-        <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 text-sm text-slate-400 text-center">
-          <p>SIEM connection import is configured in</p>
-          <p className="text-cyan-400 mt-1">Settings → Integrations</p>
-        </div>
-      )}
+      {/* ── Upload tab ── */}
+      {tab === 'upload' && (
+        <div className="space-y-3">
+          <div
+            onDragOver={(e) => { e.preventDefault(); setUploadDrag(true) }}
+            onDragLeave={() => setUploadDrag(false)}
+            onDrop={handleFileDrop}
+            onClick={() => fileRef.current?.click()}
+            className={cn(
+              'flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 cursor-pointer transition-colors',
+              uploadDrag
+                ? 'border-cyan-500 bg-cyan-500/10'
+                : 'border-slate-700 hover:border-cyan-500/50 hover:bg-slate-800/50'
+            )}
+          >
+            <Upload className="h-10 w-10 text-slate-500 mb-3" />
+            <p className="text-sm font-medium text-slate-300">Drop a rule file or click to browse</p>
+            <p className="text-xs text-slate-600 mt-1">.yml · .yaml · .json · .txt</p>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".yml,.yaml,.json,.txt"
+              onChange={handleFileInput}
+              className="hidden"
+            />
+          </div>
 
-      {/* Language detection result */}
-      {(detecting || detectedLang) && (
-        <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
-          {detecting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-400" />
-          ) : (
-            <Check className="h-3.5 w-3.5 text-emerald-400" />
-          )}
-          <span className="text-xs text-slate-400">
-            {detecting ? 'Detecting language…' : 'Detected:'}
-          </span>
-          {detectedLang && !detecting && <LangBadge lang={detectedLang} />}
-        </div>
-      )}
-
-      {/* Preview */}
-      {preview && (
-        <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Preview</p>
-          {preview.name && (
-            <p className="text-sm font-medium text-slate-200">{preview.name}</p>
-          )}
-          {preview.severity && <SeverityBadge severity={preview.severity} />}
-          {preview.techniques && preview.techniques.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {preview.techniques.map((t) => (
-                <span
-                  key={t.id}
-                  className="rounded-md bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[11px] font-mono text-purple-300"
-                >
-                  {t.id}
-                </span>
-              ))}
+          {uploadFile && (
+            <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5">
+              <FileText className="h-4 w-4 text-cyan-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-slate-200 truncate">{uploadFile.name}</p>
+                <p className="text-[11px] text-slate-500">{(uploadFile.size / 1024).toFixed(1)} KB</p>
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setUploadFile(null) }}
+                className="text-slate-500 hover:text-slate-300"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Library tab ── */}
+      {tab === 'library' && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-slate-400">Community rule starters — select to import</p>
+            <button
+              onClick={() => {
+                if (selected.size === SIGMA_LIBRARY.length) {
+                  setSelected(new Set())
+                } else {
+                  setSelected(new Set(SIGMA_LIBRARY.map((r) => r.key)))
+                }
+              }}
+              className="text-[11px] text-cyan-400 hover:text-cyan-300"
+            >
+              {selected.size === SIGMA_LIBRARY.length ? 'Deselect all' : 'Select all'}
+            </button>
+          </div>
+          {SIGMA_LIBRARY.map((item) => (
+            <label
+              key={item.key}
+              className={cn(
+                'flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors',
+                selected.has(item.key)
+                  ? 'border-cyan-500/40 bg-cyan-500/10'
+                  : 'border-slate-700 hover:border-slate-600 hover:bg-slate-800/50'
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(item.key)}
+                onChange={(e) => {
+                  const next = new Set(selected)
+                  if (e.target.checked) next.add(item.key)
+                  else next.delete(item.key)
+                  setSelected(next)
+                }}
+                className="mt-0.5 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-slate-200">{item.label}</p>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="rounded bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 text-[10px] font-mono text-purple-400">
+                    {item.technique}
+                  </span>
+                  <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', SEVERITY_STYLES[item.severity as Severity])}>
+                    {item.severity}
+                  </span>
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {/* Success message */}
+      {importCount !== null && importCount > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-300">
+          <Check className="h-3.5 w-3.5" />
+          Imported {importCount} rule{importCount !== 1 ? 's' : ''} successfully
         </div>
       )}
 
@@ -458,15 +911,102 @@ function ImportDrawerContent({ onClose, onImported }: ImportDrawerProps) {
         >
           Cancel
         </button>
-        <button
-          onClick={() => void handleImport()}
-          disabled={!text.trim() || importing}
-          className="flex-1 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-        >
-          {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-          {importing ? 'Importing…' : 'Import Rule'}
-        </button>
+
+        {tab === 'paste' && (
+          <button
+            onClick={() => void handlePasteImport()}
+            disabled={!text.trim() || importing}
+            className="flex-1 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {importing ? 'Importing…' : 'Import Rules'}
+          </button>
+        )}
+
+        {tab === 'upload' && (
+          <button
+            onClick={() => void handleFileUpload()}
+            disabled={!uploadFile || uploading}
+            className="flex-1 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            {uploading ? 'Uploading…' : 'Upload & Import'}
+          </button>
+        )}
+
+        {tab === 'library' && (
+          <button
+            onClick={() => void handleLibraryImport()}
+            disabled={selected.size === 0 || importing}
+            className="flex-1 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {importing ? 'Importing…' : `Import ${selected.size > 0 ? selected.size : ''} Rule${selected.size !== 1 ? 's' : ''}`}
+          </button>
+        )}
       </div>
+    </div>
+  )
+}
+
+// ─── Export dropdown ──────────────────────────────────────────────────────────
+
+function ExportDropdown({ selectedIds, totalCount }: { selectedIds: string[]; totalCount: number }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  function buildExportUrl(format: 'sigma' | 'json' | 'csv') {
+    const params = new URLSearchParams({ format })
+    if (selectedIds.length > 0) params.set('ids', selectedIds.join(','))
+    return `${API_BASE}/api/v2/rules/export?${params}`
+  }
+
+  const label = selectedIds.length > 0
+    ? `Export ${selectedIds.length} selected`
+    : `Export all (${totalCount})`
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export
+        <ChevronDown className="h-3 w-3 ml-0.5" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-30 w-52 rounded-lg border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
+          <p className="px-3 py-2 text-[11px] text-slate-500 border-b border-slate-800">{label}</p>
+          {(
+            [
+              { format: 'sigma', label: 'Sigma YAML (.yml)' },
+              { format: 'json', label: 'JSON Array (.json)' },
+              { format: 'csv', label: 'CSV Spreadsheet (.csv)' },
+            ] as const
+          ).map(({ format, label: fLabel }) => (
+            <a
+              key={format}
+              href={buildExportUrl(format)}
+              download
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+            >
+              <Download className="h-3.5 w-3.5 text-slate-500" />
+              {fLabel}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -483,13 +1023,33 @@ interface RuleDetailProps {
 function RuleDetailContent({ rule, onClose, onToggle, onDelete }: RuleDetailProps) {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
+  const [eventJson, setEventJson] = useState('')
+  const [eventError, setEventError] = useState<string | null>(null)
+
+  const mitreTechs = rule.mitre_techniques ?? rule.techniques?.map((t) => t.id) ?? []
 
   async function runTest() {
+    setEventError(null)
+    let eventObj: Record<string, unknown>
+    try {
+      eventObj = JSON.parse(eventJson || '{}') as Record<string, unknown>
+    } catch {
+      setEventError('Invalid JSON — fix the event before testing')
+      return
+    }
     setTesting(true)
     setTestResult(null)
     try {
-      const result = await apiPost<TestResult>('/api/v2/rules/test', { rule_id: rule.id })
-      setTestResult(result)
+      const result = await apiPost<{ matched: boolean; match_count: number; details: string; evaluation_time_ms: number }>(
+        `/api/v2/rules/${rule.id}/test`,
+        { event: eventObj }
+      )
+      setTestResult({
+        passed: result.matched,
+        matched_events: result.match_count,
+        false_positives: 0,
+        duration_ms: Math.round(result.evaluation_time_ms),
+      })
     } catch (err) {
       setTestResult({
         passed: false,
@@ -502,6 +1062,8 @@ function RuleDetailContent({ rule, onClose, onToggle, onDelete }: RuleDetailProp
       setTesting(false)
     }
   }
+
+  const rawContent = rule.raw_text ?? rule.source ?? ''
 
   return (
     <div className="p-5 space-y-5">
@@ -518,62 +1080,89 @@ function RuleDetailContent({ rule, onClose, onToggle, onDelete }: RuleDetailProp
       </div>
 
       {/* MITRE techniques */}
-      {rule.techniques.length > 0 && (
+      {mitreTechs.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-            MITRE Techniques
-          </p>
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">MITRE Techniques</p>
           <div className="flex flex-wrap gap-1.5">
-            {rule.techniques.map((t) => (
+            {mitreTechs.map((tid) => (
               <a
-                key={t.id}
-                href={`https://attack.mitre.org/techniques/${t.id.replace('.', '/')}/`}
-                target="_blank"
-                rel="noopener noreferrer"
+                key={tid}
+                href={`/mitre?technique=${tid}`}
                 className="group flex items-center gap-1 rounded-md bg-purple-500/15 border border-purple-500/30 px-2 py-1 text-[11px] font-mono text-purple-300 hover:bg-purple-500/25 transition-colors"
               >
-                <span className="font-semibold">{t.id}</span>
-                <span className="text-purple-400/60">·</span>
-                <span className="text-purple-300/80">{t.name}</span>
+                <span className="font-semibold">{tid}</span>
               </a>
             ))}
           </div>
         </div>
       )}
 
-      {/* Source */}
+      {/* Tags */}
+      {(rule.tags ?? []).length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Tags</p>
+          <div className="flex flex-wrap gap-1">
+            {(rule.tags ?? []).map((tag) => (
+              <span
+                key={tag}
+                className="flex items-center gap-1 rounded bg-slate-700/60 border border-slate-600/50 px-2 py-0.5 text-[10px] text-slate-400"
+              >
+                <Tag className="h-2.5 w-2.5" />
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rule content with line numbers */}
       <div className="space-y-2">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Source</p>
-        <pre className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
-          {rule.source}
-        </pre>
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Rule Content</p>
+        <div className="rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
+          <div className="overflow-x-auto">
+            <pre
+              className="p-3 text-[11px] font-mono text-slate-300 leading-relaxed whitespace-pre [counter-reset:line]"
+              style={{ tabSize: 2 }}
+            >
+              {rawContent.split('\n').map((line, i) => (
+                <span key={i} className="block [counter-increment:line] before:content-[counter(line)] before:mr-3 before:text-slate-600 before:select-none before:text-[10px] before:inline-block before:w-5 before:text-right">
+                  {line || ' '}
+                </span>
+              ))}
+            </pre>
+          </div>
+        </div>
       </div>
 
-      {/* Test */}
+      {/* Test rule panel */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Test Rule</p>
-          <button
-            onClick={() => void runTest()}
-            disabled={testing}
-            className="flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
-          >
-            {testing ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <PlayCircle className="h-3 w-3" />
-            )}
-            {testing ? 'Testing…' : 'Run Test'}
-          </button>
-        </div>
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Test Rule</p>
+        <textarea
+          value={eventJson}
+          onChange={(e) => setEventJson(e.target.value)}
+          placeholder={'Paste a sample event JSON here, e.g.:\n{"CommandLine": "-EncodedCommand abc", "Image": "powershell.exe"}'}
+          rows={5}
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] font-mono text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 resize-none"
+        />
+        {eventError && (
+          <p className="text-[11px] text-red-400 flex items-center gap-1">
+            <AlertCircle className="h-3 w-3" /> {eventError}
+          </p>
+        )}
+        <button
+          onClick={() => void runTest()}
+          disabled={testing}
+          className="flex items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
+        >
+          {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : <PlayCircle className="h-3 w-3" />}
+          {testing ? 'Testing…' : 'Run Test'}
+        </button>
 
         {testResult && (
           <div
             className={cn(
               'rounded-lg border p-3 space-y-2',
-              testResult.passed
-                ? 'border-emerald-500/30 bg-emerald-500/10'
-                : 'border-red-500/30 bg-red-500/10'
+              testResult.passed ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-red-500/30 bg-red-500/10'
             )}
           >
             <div className="flex items-center gap-2">
@@ -582,44 +1171,30 @@ function RuleDetailContent({ rule, onClose, onToggle, onDelete }: RuleDetailProp
               ) : (
                 <X className="h-4 w-4 text-red-400" />
               )}
-              <span
-                className={cn(
-                  'text-sm font-medium',
-                  testResult.passed ? 'text-emerald-300' : 'text-red-300'
-                )}
-              >
-                {testResult.passed ? 'Test Passed' : 'Test Failed'}
+              <span className={cn('text-sm font-medium', testResult.passed ? 'text-emerald-300' : 'text-red-300')}>
+                {testResult.passed ? 'Rule Matched' : 'No Match'}
               </span>
               <span className="ml-auto text-xs text-slate-500">{testResult.duration_ms}ms</span>
             </div>
             {!testResult.error && (
-              <div className="flex gap-4 text-xs text-slate-400">
-                <span>
-                  Matched events:{' '}
-                  <span className="text-slate-200 font-medium">{testResult.matched_events}</span>
-                </span>
-                <span>
-                  False positives:{' '}
-                  <span className="text-slate-200 font-medium">{testResult.false_positives}</span>
-                </span>
+              <div className="text-xs text-slate-400">
+                Matched events: <span className="text-slate-200 font-medium">{testResult.matched_events}</span>
               </div>
             )}
-            {testResult.error && (
-              <p className="text-xs text-red-300">{testResult.error}</p>
-            )}
+            {testResult.error && <p className="text-xs text-red-300">{testResult.error}</p>}
           </div>
         )}
       </div>
 
+      {/* Version history placeholder */}
+      <div className="rounded-lg border border-slate-800 px-3 py-2.5">
+        <p className="text-xs text-slate-500">Version history — coming soon</p>
+      </div>
+
       {/* Actions */}
       <div className="flex gap-2 pt-1 border-t border-slate-800">
-        <Toggle
-          checked={rule.enabled}
-          onChange={(v) => onToggle(rule.id, v)}
-        />
-        <span className="text-xs text-slate-400 self-center">
-          {rule.enabled ? 'Enabled' : 'Disabled'}
-        </span>
+        <Toggle checked={rule.enabled} onChange={(v) => onToggle(rule.id, v)} />
+        <span className="text-xs text-slate-400 self-center">{rule.enabled ? 'Enabled' : 'Disabled'}</span>
         <div className="ml-auto flex gap-2">
           <button
             onClick={() => {
@@ -648,6 +1223,10 @@ export default function RulesPage() {
   const [search, setSearch] = useState('')
   const [langFilter, setLangFilter] = useState<RuleLanguage | ''>('')
   const [severityFilter, setSeverityFilter] = useState<Severity | ''>('')
+  const [tagFilter, setTagFilter] = useState('')
+  const [mitreFilter, setMitreFilter] = useState('')
+  const [hasMitreFilter, setHasMitreFilter] = useState<boolean | null>(null)
+  const [sortOrder, setSortOrder] = useState<'created_at_desc' | 'name_asc' | 'severity_desc'>('created_at_desc')
 
   // Pagination
   const [page, setPage] = useState(0)
@@ -655,9 +1234,11 @@ export default function RulesPage() {
   // Selection (bulk actions)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  // Drawers
+  // Drawers / modals
   const [importDrawerOpen, setImportDrawerOpen] = useState(false)
   const [detailRule, setDetailRule] = useState<DetectionRule | null>(null)
+  const [validateOpen, setValidateOpen] = useState(false)
+  const [validateIds, setValidateIds] = useState<string[]>([])
 
   // Coverage
   const [coverageOpen, setCoverageOpen] = useState(false)
@@ -673,26 +1254,43 @@ export default function RulesPage() {
     setLoading(true)
     setError(null)
     try {
-      const data = await apiGet<DetectionRule[]>('/api/v2/rules')
-      setRules(data)
+      const params = new URLSearchParams()
+      if (langFilter) params.set('language', langFilter)
+      if (severityFilter) params.set('severity', severityFilter)
+      if (mitreFilter) params.set('technique_id', mitreFilter)
+      if (tagFilter) params.set('tag', tagFilter)
+      if (hasMitreFilter !== null) params.set('has_mitre', String(hasMitreFilter))
+      params.set('sort', sortOrder)
+      params.set('limit', '200')
+
+      const query = params.toString()
+      const data = await apiGet<{ rules: DetectionRule[] } | DetectionRule[]>(
+        `/api/v2/rules${query ? `?${query}` : ''}`
+      )
+      const ruleList = Array.isArray(data) ? data : data.rules
+      setRules(ruleList)
     } catch {
       setRules(SEED_RULES)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [langFilter, severityFilter, mitreFilter, tagFilter, hasMitreFilter, sortOrder])
 
   useEffect(() => {
     void loadRules()
   }, [loadRules])
 
-  // ── Filter + paginate ─────────────────────────────────────────────────────
+  // ── Client-side search filter (on top of server-filtered results) ─────────
 
   const filtered = rules.filter((r) => {
-    if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
-    if (langFilter && r.language !== langFilter) return false
-    if (severityFilter && r.severity !== severityFilter) return false
-    return true
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      r.name.toLowerCase().includes(q) ||
+      (r.description ?? '').toLowerCase().includes(q) ||
+      (r.mitre_techniques ?? []).some((t) => t.toLowerCase().includes(q)) ||
+      (r.tags ?? []).some((t) => t.toLowerCase().includes(q))
+    )
   })
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
@@ -702,6 +1300,7 @@ export default function RulesPage() {
 
   function toggleRule(id: string, enabled: boolean) {
     setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enabled } : r)))
+    void apiPost(`/api/v2/rules/${id}`, { enabled }).catch(() => {})
   }
 
   // ── Delete rule ────────────────────────────────────────────────────────────
@@ -710,7 +1309,7 @@ export default function RulesPage() {
     try {
       await apiDelete(`/api/v2/rules/${id}`)
     } catch {
-      // ignore API errors, remove locally
+      // remove locally even on API error
     }
     setRules((prev) => prev.filter((r) => r.id !== id))
     setSelected((prev) => {
@@ -742,6 +1341,12 @@ export default function RulesPage() {
     setSelected(new Set())
   }
 
+  function openBatchValidate() {
+    const ids = selected.size > 0 ? [...selected] : filtered.map((r) => r.id)
+    setValidateIds(ids)
+    setValidateOpen(true)
+  }
+
   // ── Coverage ───────────────────────────────────────────────────────────────
 
   async function loadCoverage() {
@@ -750,7 +1355,6 @@ export default function RulesPage() {
       const data = await apiGet<CoverageCell[]>('/api/v2/rules/coverage')
       setCoverageCells(data)
     } catch {
-      // mock coverage
       setCoverageCells([
         { tactic: 'Initial Access', technique_id: 'T1566', technique_name: 'Phishing', coverage: 80 },
         { tactic: 'Initial Access', technique_id: 'T1190', technique_name: 'Exploit Public', coverage: 40 },
@@ -788,6 +1392,8 @@ export default function RulesPage() {
     }
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <>
       <div className="space-y-4">
@@ -796,22 +1402,29 @@ export default function RulesPage() {
           <div>
             <h1 className="text-xl font-bold text-slate-100">Detection Rules</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {rules.length} rules across {LANGUAGES.length} languages
+              {rules.length} rules · {rules.filter((r) => r.enabled).length} enabled
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => void loadCoverage()}
               disabled={loadingCoverage}
               className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
             >
-              {loadingCoverage ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Grid3X3 className="h-3.5 w-3.5" />
-              )}
+              {loadingCoverage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Grid3X3 className="h-3.5 w-3.5" />}
               Coverage Matrix
             </button>
+            <button
+              onClick={openBatchValidate}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {selected.size > 0 ? `Validate ${selected.size}` : 'Validate All'}
+            </button>
+            <ExportDropdown
+              selectedIds={[...selected]}
+              totalCount={filtered.length}
+            />
             <button
               onClick={() => void loadRules()}
               className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
@@ -828,50 +1441,90 @@ export default function RulesPage() {
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
-            <input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
-                setPage(0)
-              }}
-              placeholder="Search rules…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
-            />
+        {/* Filter bar */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+              <input
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(0) }}
+                placeholder="Search rules, tags, techniques…"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+            <select
+              value={langFilter}
+              onChange={(e) => { setLangFilter(e.target.value as RuleLanguage | ''); setPage(0) }}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">All Languages</option>
+              {LANGUAGES.map((l) => (
+                <option key={l} value={l}>{l.toUpperCase()}</option>
+              ))}
+            </select>
+            <select
+              value={severityFilter}
+              onChange={(e) => { setSeverityFilter(e.target.value as Severity | ''); setPage(0) }}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">All Severities</option>
+              {SEVERITY_ORDER.map((s) => (
+                <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+              ))}
+            </select>
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as typeof sortOrder)}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="created_at_desc">Newest first</option>
+              <option value="name_asc">Name A–Z</option>
+              <option value="severity_desc">Severity (high first)</option>
+            </select>
           </div>
-          <select
-            value={langFilter}
-            onChange={(e) => {
-              setLangFilter(e.target.value as RuleLanguage | '')
-              setPage(0)
-            }}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
-          >
-            <option value="">All Languages</option>
-            {LANGUAGES.map((l) => (
-              <option key={l} value={l}>
-                {l.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <select
-            value={severityFilter}
-            onChange={(e) => {
-              setSeverityFilter(e.target.value as Severity | '')
-              setPage(0)
-            }}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
-          >
-            <option value="">All Severities</option>
-            {SEVERITY_ORDER.map((s) => (
-              <option key={s} value={s}>
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
+
+          {/* Advanced filters row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <Tag className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-500" />
+              <input
+                value={tagFilter}
+                onChange={(e) => { setTagFilter(e.target.value); setPage(0) }}
+                placeholder="Tag filter…"
+                className="rounded-lg border border-slate-700 bg-slate-800 pl-7 pr-3 py-1.5 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 w-36"
+              />
+            </div>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-500" />
+              <input
+                value={mitreFilter}
+                onChange={(e) => { setMitreFilter(e.target.value); setPage(0) }}
+                placeholder="Technique ID…"
+                className="rounded-lg border border-slate-700 bg-slate-800 pl-7 pr-3 py-1.5 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 w-36"
+              />
+            </div>
+            <button
+              onClick={() => setHasMitreFilter(hasMitreFilter === true ? null : true)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                hasMitreFilter === true
+                  ? 'border-purple-500/50 bg-purple-500/20 text-purple-300'
+                  : 'border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200'
+              )}
+            >
+              Has MITRE
+            </button>
+            {(tagFilter || mitreFilter || hasMitreFilter !== null) && (
+              <button
+                onClick={() => { setTagFilter(''); setMitreFilter(''); setHasMitreFilter(null) }}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300"
+              >
+                <X className="h-3 w-3" />
+                Clear filters
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Bulk actions bar */}
@@ -888,16 +1541,20 @@ export default function RulesPage() {
                 Test Selected
               </button>
               <button
+                onClick={openBatchValidate}
+                className="flex items-center gap-1.5 rounded-md bg-slate-800 border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:text-white transition-colors"
+              >
+                <ShieldCheck className="h-3 w-3" />
+                Validate
+              </button>
+              <button
                 onClick={() => void bulkDelete()}
                 className="flex items-center gap-1.5 rounded-md bg-red-500/10 border border-red-500/30 px-2.5 py-1.5 text-xs text-red-300 hover:bg-red-500/20 transition-colors"
               >
                 <Trash2 className="h-3 w-3" />
-                Delete Selected
+                Delete
               </button>
-              <button
-                onClick={() => setSelected(new Set())}
-                className="text-xs text-slate-500 hover:text-slate-300"
-              >
+              <button onClick={() => setSelected(new Set())} className="text-xs text-slate-500 hover:text-slate-300">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -914,7 +1571,6 @@ export default function RulesPage() {
 
         {/* Table */}
         <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-          {/* Header */}
           <div className="grid grid-cols-[2rem_2fr_5rem_6rem_1fr_6rem_4rem] gap-3 border-b border-slate-800 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-slate-500">
             <label className="flex items-center cursor-pointer">
               <input
@@ -932,7 +1588,6 @@ export default function RulesPage() {
             <span className="text-center">Actions</span>
           </div>
 
-          {/* Rows */}
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-sm text-slate-500">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -945,85 +1600,80 @@ export default function RulesPage() {
             </div>
           ) : (
             <div className="divide-y divide-slate-800">
-              {pageRules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="grid grid-cols-[2rem_2fr_5rem_6rem_1fr_6rem_4rem] gap-3 items-center px-4 py-3 hover:bg-slate-800/50 transition-colors group"
-                >
-                  <label
-                    className="flex items-center cursor-pointer"
-                    onClick={(e) => e.stopPropagation()}
+              {pageRules.map((rule) => {
+                const techs = rule.mitre_techniques ?? rule.techniques?.map((t) => t.id) ?? []
+                return (
+                  <div
+                    key={rule.id}
+                    className="grid grid-cols-[2rem_2fr_5rem_6rem_1fr_6rem_4rem] gap-3 items-center px-4 py-3 hover:bg-slate-800/50 transition-colors group"
                   >
-                    <input
-                      type="checkbox"
-                      checked={selected.has(rule.id)}
-                      onChange={(e) => {
-                        const next = new Set(selected)
-                        if (e.target.checked) next.add(rule.id)
-                        else next.delete(rule.id)
-                        setSelected(next)
-                      }}
-                      className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
-                    />
-                  </label>
+                    <label className="flex items-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(rule.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected)
+                          if (e.target.checked) next.add(rule.id)
+                          else next.delete(rule.id)
+                          setSelected(next)
+                        }}
+                        className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
+                      />
+                    </label>
 
-                  <button
-                    onClick={() => setDetailRule(rule)}
-                    className="text-left min-w-0 group/name"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-medium text-slate-200 truncate group-hover/name:text-cyan-400 transition-colors">
-                        {rule.name}
-                      </span>
-                      <ChevronRight className="h-3 w-3 text-slate-600 opacity-0 group-hover/name:opacity-100 shrink-0 transition-opacity" />
+                    <button onClick={() => setDetailRule(rule)} className="text-left min-w-0 group/name">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-slate-200 truncate group-hover/name:text-cyan-400 transition-colors">
+                          {rule.name}
+                        </span>
+                        <ChevronRight className="h-3 w-3 text-slate-600 opacity-0 group-hover/name:opacity-100 shrink-0 transition-opacity" />
+                      </div>
+                      {rule.description && (
+                        <p className="text-[11px] text-slate-500 truncate mt-0.5">{rule.description}</p>
+                      )}
+                    </button>
+
+                    <LangBadge lang={rule.language} />
+                    <SeverityBadge severity={rule.severity} />
+
+                    <div className="flex flex-wrap gap-1 min-w-0">
+                      {techs.slice(0, 3).map((t) => (
+                        <span
+                          key={t}
+                          title={t}
+                          className="rounded bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 text-[10px] font-mono text-purple-400"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                      {techs.length > 3 && (
+                        <span className="text-[10px] text-slate-500">+{techs.length - 3}</span>
+                      )}
                     </div>
-                  </button>
 
-                  <LangBadge lang={rule.language} />
-                  <SeverityBadge severity={rule.severity} />
+                    <div className="flex justify-center">
+                      <Toggle checked={rule.enabled} onChange={(v) => toggleRule(rule.id, v)} />
+                    </div>
 
-                  <div className="flex flex-wrap gap-1 min-w-0">
-                    {rule.techniques.slice(0, 3).map((t) => (
-                      <span
-                        key={t.id}
-                        title={t.name}
-                        className="rounded bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 text-[10px] font-mono text-purple-400"
+                    <div className="flex justify-center gap-1">
+                      <button
+                        onClick={() => setDetailRule(rule)}
+                        className="rounded p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-colors"
+                        title="View details"
                       >
-                        {t.id}
-                      </span>
-                    ))}
-                    {rule.techniques.length > 3 && (
-                      <span className="text-[10px] text-slate-500">
-                        +{rule.techniques.length - 3}
-                      </span>
-                    )}
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => void deleteRule(rule.id)}
+                        className="rounded p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        title="Delete rule"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
-
-                  <div className="flex justify-center">
-                    <Toggle
-                      checked={rule.enabled}
-                      onChange={(v) => toggleRule(rule.id, v)}
-                    />
-                  </div>
-
-                  <div className="flex justify-center gap-1">
-                    <button
-                      onClick={() => setDetailRule(rule)}
-                      className="rounded p-1.5 text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-colors"
-                      title="View details"
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => void deleteRule(rule.id)}
-                      className="rounded p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      title="Delete rule"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -1043,7 +1693,7 @@ export default function RulesPage() {
               >
                 Prev
               </button>
-              {Array.from({ length: totalPages }, (_, i) => (
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => (
                 <button
                   key={i}
                   onClick={() => setPage(i)}
@@ -1068,15 +1718,8 @@ export default function RulesPage() {
       </div>
 
       {/* Import drawer */}
-      <Drawer
-        open={importDrawerOpen}
-        onClose={() => setImportDrawerOpen(false)}
-        title="Import Detection Rules"
-      >
-        <ImportDrawerContent
-          onClose={() => setImportDrawerOpen(false)}
-          onImported={() => void loadRules()}
-        />
+      <Drawer open={importDrawerOpen} onClose={() => setImportDrawerOpen(false)} title="Import Detection Rules">
+        <ImportDrawerContent onClose={() => setImportDrawerOpen(false)} onImported={() => void loadRules()} />
       </Drawer>
 
       {/* Rule detail drawer */}
@@ -1096,11 +1739,7 @@ export default function RulesPage() {
       </Drawer>
 
       {/* Coverage matrix drawer */}
-      <Drawer
-        open={coverageOpen}
-        onClose={() => setCoverageOpen(false)}
-        title="MITRE ATT&CK Coverage Matrix"
-      >
+      <Drawer open={coverageOpen} onClose={() => setCoverageOpen(false)} title="MITRE ATT&CK Coverage Matrix">
         <div className="p-5">
           {coverageCells.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-sm text-slate-500">
@@ -1110,27 +1749,25 @@ export default function RulesPage() {
           ) : (
             <>
               <div className="flex items-center gap-3 mb-4 text-xs text-slate-500">
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded bg-slate-800" /> 0%
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded bg-cyan-900/60" /> 1–25%
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded bg-cyan-700/60" /> 26–50%
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded bg-cyan-600/70" /> 51–75%
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded bg-cyan-500/80" /> 76–100%
-                </div>
+                <div className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-slate-800" /> 0%</div>
+                <div className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-cyan-900/60" /> 1–25%</div>
+                <div className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-cyan-700/60" /> 26–50%</div>
+                <div className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-cyan-600/70" /> 51–75%</div>
+                <div className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-cyan-500/80" /> 76–100%</div>
               </div>
               <CoverageHeatmap cells={coverageCells} />
             </>
           )}
         </div>
       </Drawer>
+
+      {/* Batch validate modal */}
+      {validateOpen && (
+        <BatchValidateModal
+          ruleIds={validateIds}
+          onClose={() => setValidateOpen(false)}
+        />
+      )}
     </>
   )
 }

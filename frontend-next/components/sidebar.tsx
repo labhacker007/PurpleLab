@@ -17,6 +17,7 @@ import {
   Activity,
   ShieldCheck,
   BookOpen,
+  Target,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -24,6 +25,7 @@ import { useAuthStore } from "@/stores/auth"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/mitre", label: "MITRE ATT&CK", icon: Target },
   { href: "/pipeline", label: "Pipeline", icon: Workflow },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/environments", label: "Environments", icon: Server },
