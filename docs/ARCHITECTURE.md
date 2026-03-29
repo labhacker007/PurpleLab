@@ -2,6 +2,7 @@
 
 **Last updated:** 2026-03-28
 **Purpose:** Single source of truth for what is built, what is stubbed, and how every component connects.
+**See also:** [VISION_AND_MASTER_PLAN.md](VISION_AND_MASTER_PLAN.md) — full platform vision with 50+ log sources, scoring models, Joti integration, and HITL workflows.
 
 ---
 
