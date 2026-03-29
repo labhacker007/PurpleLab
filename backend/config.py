@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Vector DB
     CHROMA_PERSIST_DIR: str = "./data/chroma"
 
+    # Joti integration
+    JOTI_BASE_URL: str = ""              # e.g. "https://joti.yourorg.com"
+    JOTI_API_KEY: str = ""               # "joti_<64 hex chars>"
+    JOTI_WEBHOOK_TOKEN: str = ""         # For alert ingestion endpoint
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

@@ -1,7 +1,8 @@
 """Log generation tools for the agent orchestrator.
 
-Provides tools for generating synthetic attack and sample logs using
-both the log source generators and the simulation engine generators.
+Uses the AgenticLogGenerator — reads schemas from the SchemaRegistry (ChromaDB),
+calls Claude to produce events dynamically, caches templates in Redis/memory.
+Never uses hardcoded event templates.
 """
 from __future__ import annotations
 
@@ -12,33 +13,6 @@ from backend.agent.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Log source types from backend/log_sources/sources/
-_LOG_SOURCE_TYPES = {
-    "sysmon": "Microsoft Sysmon telemetry events",
-    "windows_eventlog": "Windows Security/System/Application Event Logs",
-    "linux_audit": "Linux auditd events",
-    "dns": "DNS query/response logs",
-    "firewall": "Network firewall logs",
-    "proxy": "Web proxy logs",
-    "cloud_trail": "AWS CloudTrail events",
-}
-
-# Engine generator types from backend/engine/generators/
-_ENGINE_GENERATOR_TYPES = {
-    "splunk": "Splunk SIEM alerts and events",
-    "crowdstrike": "CrowdStrike Falcon EDR detections",
-    "sentinel": "Microsoft Sentinel alerts",
-    "okta": "Okta identity events",
-    "proofpoint": "Proofpoint email security events",
-    "servicenow": "ServiceNow security incidents",
-    "carbon_black": "VMware Carbon Black EDR events",
-    "defender_endpoint": "Microsoft Defender for Endpoint alerts",
-    "entra_id": "Microsoft Entra ID (Azure AD) sign-in events",
-    "qradar": "IBM QRadar SIEM offenses",
-    "elastic": "Elastic Security alerts",
-    "guardduty": "AWS GuardDuty findings",
-}
-
 
 def register_tools(registry: ToolRegistry) -> None:
     """Register all log generation tools."""
@@ -46,210 +20,205 @@ def register_tools(registry: ToolRegistry) -> None:
     registry.register(
         name="generate_attack_logs",
         description=(
-            "Generate synthetic logs containing attack indicators for a "
-            "specific MITRE ATT&CK technique. Uses the simulation engine "
-            "generators to produce realistic vendor-format events."
+            "Generate synthetic log events containing attack indicators for a "
+            "specific MITRE ATT&CK technique. Uses the agentic log generator — "
+            "reads vendor schemas from ChromaDB, generates realistic events via "
+            "Claude, and caches templates so repeated calls are fast. "
+            "Use list_log_sources to see available source IDs."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "technique": {
+                "source_id": {
                     "type": "string",
                     "description": (
-                        "MITRE ATT&CK technique ID or name "
-                        "(e.g., 'T1059.001' or 'PowerShell')."
+                        "Log source ID from the schema registry "
+                        "(e.g. 'windows_sysmon', 'aws_cloudtrail', 'kubernetes_audit'). "
+                        "Use list_log_sources to enumerate all options."
                     ),
                 },
-                "source_type": {
+                "technique_id": {
                     "type": "string",
-                    "description": (
-                        "Generator type to use (e.g., 'splunk', 'crowdstrike', "
-                        "'elastic', 'sentinel'). Use 'list_available_generators' "
-                        "to see all options."
-                    ),
+                    "description": "MITRE ATT&CK technique ID (e.g. 'T1059.001').",
                 },
                 "count": {
                     "type": "integer",
-                    "description": "Number of log events to generate (1-100).",
-                    "default": 5,
+                    "description": "Number of attack events to generate (1-100).",
+                    "default": 10,
+                },
+                "snr_ratio": {
+                    "type": "number",
+                    "description": (
+                        "Signal-to-noise ratio (0.0–1.0). "
+                        "1.0 = all attack events. 0.2 = 20% attack + 80% benign noise. "
+                        "Default 1.0."
+                    ),
+                    "default": 1.0,
+                },
+                "force_refresh": {
+                    "type": "boolean",
+                    "description": (
+                        "Bypass the template cache and ask Claude to generate fresh events. "
+                        "Use when you want new variation or after a schema update."
+                    ),
+                    "default": False,
                 },
             },
-            "required": ["technique", "source_type"],
+            "required": ["source_id", "technique_id"],
         },
         handler=_generate_attack_logs,
     )
 
     registry.register(
-        name="generate_sample_logs",
+        name="generate_benign_logs",
         description=(
-            "Generate sample log events from a specific simulation engine "
-            "generator. Produces realistic vendor-format events with a mix of "
-            "severities."
+            "Generate realistic benign/normal log events from a log source. "
+            "Useful for creating noise context around attack simulations. "
+            "Events are Claude-generated from the schema, cached for reuse."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "source_type": {
+                "source_id": {
                     "type": "string",
-                    "description": (
-                        "Generator type (e.g., 'splunk', 'crowdstrike', "
-                        "'elastic', 'sentinel', 'okta', 'guardduty')."
-                    ),
+                    "description": "Log source ID (e.g. 'windows_security', 'dns').",
                 },
                 "count": {
                     "type": "integer",
-                    "description": "Number of log events to generate (1-100).",
-                    "default": 10,
+                    "description": "Number of benign events to generate (1-200).",
+                    "default": 20,
+                },
+                "force_refresh": {
+                    "type": "boolean",
+                    "description": "Bypass cache and regenerate.",
+                    "default": False,
                 },
             },
-            "required": ["source_type"],
+            "required": ["source_id"],
         },
-        handler=_generate_sample_logs,
+        handler=_generate_benign_logs,
     )
 
     registry.register(
-        name="list_available_generators",
+        name="list_log_sources",
         description=(
-            "List all available log source generators and simulation engine "
-            "generators with their descriptions and capabilities."
+            "List all log sources registered in the schema registry with their "
+            "vendor, product, MITRE technique mappings, and SIEM integration details. "
+            "Use this before generate_attack_logs to find valid source_id values."
         ),
         parameters={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": (
+                        "Filter by category: endpoint|cloud|network|identity|"
+                        "email|container|cdn|posture. Omit for all sources."
+                    ),
+                },
+            },
             "required": [],
         },
-        handler=_list_available_generators,
+        handler=_list_log_sources,
+    )
+
+    registry.register(
+        name="invalidate_log_source_cache",
+        description=(
+            "Flush cached log templates for a source. Use after a schema update "
+            "so the next generate call fetches fresh templates from Claude."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "source_id": {
+                    "type": "string",
+                    "description": "Source ID whose cached templates to flush.",
+                },
+            },
+            "required": ["source_id"],
+        },
+        handler=_invalidate_cache,
     )
 
 
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
 async def _generate_attack_logs(
-    technique: str, source_type: str, count: int = 5
+    source_id: str,
+    technique_id: str,
+    count: int = 10,
+    snr_ratio: float = 1.0,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
-    """Generate attack-pattern logs for a specific technique."""
     count = max(1, min(count, 100))
-
+    snr_ratio = max(0.0, min(1.0, snr_ratio))
     try:
-        from backend.engine.generators import GENERATOR_REGISTRY
-        from backend.engine.generators.base import GeneratorConfig
-
-        gen_cls = GENERATOR_REGISTRY.get(source_type)
-        if gen_cls is None:
-            available = sorted(GENERATOR_REGISTRY.keys())
-            return {
-                "error": (
-                    f"Unknown generator type '{source_type}'. "
-                    f"Available: {', '.join(available)}"
-                ),
-            }
-
-        config = GeneratorConfig(
-            product_type=source_type,
-            target_url="",  # not dispatching, just generating
-            severity_weights={
-                "critical": 0.30,
-                "high": 0.50,
-                "medium": 0.15,
-                "low": 0.05,
-            },
+        from backend.log_sources.agentic_generator import get_generator
+        gen = get_generator()
+        result = await gen.generate(
+            source_id=source_id,
+            technique_id=technique_id,
+            count=count,
+            snr_ratio=snr_ratio,
+            force_refresh=force_refresh,
         )
-        generator = gen_cls(config)
-        events = generator.generate_batch(count=count)
-
-        # Tag events with the requested technique
-        for event in events:
-            event["_purplelab_technique"] = technique
-            event["_purplelab_source"] = source_type
-
-        return {
-            "status": "success",
-            "technique": technique,
-            "source_type": source_type,
-            "count": len(events),
-            "events": events,
-        }
+        return result
     except Exception as exc:
         logger.exception("generate_attack_logs failed")
-        return {"error": f"Failed to generate attack logs: {exc}"}
+        return {"error": f"Generation failed: {exc}", "events": []}
 
 
-async def _generate_sample_logs(
-    source_type: str, count: int = 10
+async def _generate_benign_logs(
+    source_id: str,
+    count: int = 20,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
-    """Generate sample logs from a simulation engine generator."""
-    count = max(1, min(count, 100))
-
+    count = max(1, min(count, 200))
     try:
-        from backend.engine.generators import GENERATOR_REGISTRY
-        from backend.engine.generators.base import GeneratorConfig
-
-        gen_cls = GENERATOR_REGISTRY.get(source_type)
-        if gen_cls is None:
-            available = sorted(GENERATOR_REGISTRY.keys())
-            return {
-                "error": (
-                    f"Unknown generator type '{source_type}'. "
-                    f"Available: {', '.join(available)}"
-                ),
-            }
-
-        config = GeneratorConfig(
-            product_type=source_type,
-            target_url="",
+        from backend.log_sources.agentic_generator import get_generator
+        gen = get_generator()
+        result = await gen.generate_benign(
+            source_id=source_id,
+            count=count,
+            force_refresh=force_refresh,
         )
-        generator = gen_cls(config)
-        events = generator.generate_batch(count=count)
-
-        for event in events:
-            event["_purplelab_source"] = source_type
-
-        return {
-            "status": "success",
-            "source_type": source_type,
-            "count": len(events),
-            "events": events,
-        }
+        return result
     except Exception as exc:
-        logger.exception("generate_sample_logs failed")
-        return {"error": f"Failed to generate sample logs: {exc}"}
+        logger.exception("generate_benign_logs failed")
+        return {"error": f"Generation failed: {exc}", "events": []}
 
 
-async def _list_available_generators() -> dict[str, Any]:
-    """List all available generators with their capabilities."""
+async def _list_log_sources(category: str | None = None) -> dict[str, Any]:
     try:
-        from backend.engine.generators import GENERATOR_REGISTRY
-        from backend.engine.generators.base import BaseGenerator
-
-        engine_generators = []
-        for name, gen_cls in sorted(GENERATOR_REGISTRY.items()):
-            engine_generators.append({
-                "type": name,
-                "product_name": getattr(gen_cls, "product_name", name),
-                "category": getattr(gen_cls, "product_category", "unknown"),
-                "description": _ENGINE_GENERATOR_TYPES.get(name, ""),
-            })
-
-        log_sources = [
-            {"type": k, "description": v}
-            for k, v in sorted(_LOG_SOURCE_TYPES.items())
-        ]
-
+        from backend.log_sources.agentic_generator import get_generator
+        gen = get_generator()
+        sources = await gen.list_sources()
+        if category:
+            sources = [s for s in sources if s["category"] == category]
         return {
             "status": "success",
-            "engine_generators": {
-                "count": len(engine_generators),
-                "generators": engine_generators,
-            },
-            "log_sources": {
-                "count": len(log_sources),
-                "sources": log_sources,
-                "note": (
-                    "Log source generators (sysmon, windows_eventlog, etc.) "
-                    "are not yet fully implemented. Use engine generators "
-                    "(splunk, crowdstrike, elastic, etc.) for production-quality "
-                    "event generation."
-                ),
-            },
+            "count": len(sources),
+            "sources": sources,
         }
     except Exception as exc:
-        logger.exception("list_available_generators failed")
-        return {"error": f"Failed to list generators: {exc}"}
+        logger.exception("list_log_sources failed")
+        return {"error": f"Failed: {exc}"}
+
+
+async def _invalidate_cache(source_id: str) -> dict[str, Any]:
+    try:
+        from backend.log_sources.agentic_generator import get_generator
+        gen = get_generator()
+        flushed = await gen.invalidate_source(source_id)
+        return {
+            "status": "success",
+            "source_id": source_id,
+            "templates_flushed": flushed,
+            "message": f"Flushed {flushed} cached templates for '{source_id}'.",
+        }
+    except Exception as exc:
+        logger.exception("invalidate_log_source_cache failed")
+        return {"error": f"Failed: {exc}"}
