@@ -2,7 +2,8 @@
  * PurpleLab base API client with typed helpers and SSE streaming.
  */
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+// Always use relative URLs — Next.js rewrites proxy /api/* to the backend
+export const API_BASE = ''
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 

@@ -163,10 +163,11 @@ services:
       context: ./frontend-next
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:8000}
+        NEXT_PUBLIC_API_URL: http://backend:8000
     container_name: purplelab-frontend
     environment:
       NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://backend:8000
     ports:
       - "${PURPLELAB_FRONTEND_PORT:-3002}:3000"
     depends_on:

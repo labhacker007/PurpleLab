@@ -205,7 +205,7 @@ async def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
         if not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account disabled")
 
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.utcnow()
         db.add(user)
         await _write_audit(db, user.id, "login", ip_address=ip)
         await db.commit()

@@ -690,6 +690,216 @@ async def detect_language(body: dict[str, str]):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# ── Sigma Library — Community Repository Integration ──────────────────────────
+# NOTE: These MUST come before /{rule_id} to avoid being caught by the catch-all.
+
+SIGMA_REPOS = [
+    # ── Tier 1: Primary Sigma Sources ──
+    {
+        "id": "sigmahq",
+        "name": "SigmaHQ",
+        "url": "https://github.com/SigmaHQ/sigma",
+        "api_url": "https://api.github.com/repos/SigmaHQ/sigma",
+        "raw_base": "https://raw.githubusercontent.com/SigmaHQ/sigma/master/rules",
+        "description": "Official Sigma detection rules — the gold standard. 3000+ community-maintained rules across all platforms.",
+        "stars": "10300+", "rules_count": "3000+",
+        "categories": ["windows", "linux", "macos", "cloud", "network", "web", "proxy", "application"],
+        "maintained_by": "SigmaHQ Community", "tier": "primary", "format": "sigma",
+        "browseable": True,
+    },
+    {
+        "id": "hayabusa-rules",
+        "name": "Hayabusa Sigma Rules",
+        "url": "https://github.com/Yamato-Security/hayabusa-rules",
+        "description": "4000+ Sigma rules optimized for Windows event log forensics. Largest Sigma collection.",
+        "stars": "1000+", "rules_count": "4000+",
+        "maintained_by": "Yamato Security (Japan DFIR)", "tier": "primary", "format": "sigma",
+        "browseable": True,
+    },
+    {
+        "id": "mdecrevoisier",
+        "name": "SIGMA Detection Rules (mdecrevoisier)",
+        "url": "https://github.com/mdecrevoisier/SIGMA-detection-rules",
+        "description": "350+ high-quality Sigma rules mapped to MITRE ATT&CK. Covers AD, Azure, DNS, Exchange, RDP, SQL Server.",
+        "stars": "418+", "rules_count": "350+",
+        "maintained_by": "mdecrevoisier", "tier": "primary", "format": "sigma",
+        "browseable": False,
+    },
+    # ── Tier 2: Vendor-Maintained ──
+    {
+        "id": "elastic-detection-rules",
+        "name": "Elastic Detection Rules",
+        "url": "https://github.com/elastic/detection-rules",
+        "description": "Official Elastic SIEM rules (KQL/EQL format, convertible to Sigma via pySigma).",
+        "stars": "2500+", "rules_count": "1000+",
+        "maintained_by": "Elastic", "tier": "vendor", "format": "kql/eql",
+        "browseable": True,
+    },
+    {
+        "id": "splunk-security-content",
+        "name": "Splunk Security Content",
+        "url": "https://github.com/splunk/security_content",
+        "description": "Splunk Analytic Stories — detection searches, investigations, and SOAR playbooks (SPL format).",
+        "stars": "1600+", "rules_count": "1000+",
+        "maintained_by": "Splunk Threat Research Team", "tier": "vendor", "format": "spl",
+        "browseable": False,
+    },
+    {
+        "id": "panther-analysis",
+        "name": "Panther Analysis",
+        "url": "https://github.com/panther-labs/panther-analysis",
+        "description": "Cloud-native detection rules for AWS, GCP, Azure, Okta, and SaaS platforms (Python).",
+        "stars": "600+", "rules_count": "700+",
+        "maintained_by": "Panther Labs", "tier": "vendor", "format": "python",
+        "browseable": False,
+    },
+    # ── Tier 3: Community / Research ──
+    {
+        "id": "loldrivers",
+        "name": "LOLDrivers Sigma Rules",
+        "url": "https://github.com/magicsword-io/LOLDrivers",
+        "description": "400+ Sigma rules for detecting vulnerable and malicious Windows drivers (hash-based).",
+        "stars": "1400+", "rules_count": "400+",
+        "maintained_by": "magicsword.io", "tier": "community", "format": "sigma",
+        "browseable": False,
+    },
+    {
+        "id": "joesecurity",
+        "name": "Joe Security Sigma Rules",
+        "url": "https://github.com/joesecurity/sigma-rules",
+        "description": "Sigma rules from sandbox behavioral analysis — malware detection focused.",
+        "stars": "233+", "rules_count": "100+",
+        "maintained_by": "Joe Security", "tier": "community", "format": "sigma",
+        "browseable": False,
+    },
+    {
+        "id": "dfir-report",
+        "name": "The DFIR Report Sigma Rules",
+        "url": "https://github.com/The-DFIR-Report/Sigma-Rules",
+        "description": "High-quality rules derived from real incident investigations. Most contributed upstream to SigmaHQ.",
+        "stars": "204+", "rules_count": "50+",
+        "maintained_by": "The DFIR Report", "tier": "community", "format": "sigma",
+        "browseable": False,
+    },
+    {
+        "id": "atomic-red-team",
+        "name": "Atomic Red Team",
+        "url": "https://github.com/redcanaryco/atomic-red-team",
+        "description": "1500+ portable detection tests mapped to MITRE ATT&CK — test your Sigma rules against real attacks.",
+        "stars": "9500+", "rules_count": "1500+ tests",
+        "maintained_by": "Red Canary", "tier": "testing", "format": "yaml",
+        "browseable": False,
+    },
+    {
+        "id": "mbabinski",
+        "name": "Sigma Rules (mbabinski)",
+        "url": "https://github.com/mbabinski/Sigma-Rules",
+        "description": "Threat-specific research rules covering ransomware families, malware variants (2022–2025).",
+        "stars": "164+", "rules_count": "100+",
+        "maintained_by": "mbabinski", "tier": "community", "format": "sigma",
+        "browseable": False,
+    },
+    {
+        "id": "p4t12ick",
+        "name": "Sigma Rule Repository (P4T12ICK)",
+        "url": "https://github.com/P4T12ICK/Sigma-Rule-Repository",
+        "description": "Sigma rules with full testing documentation — every rule has a validated test case.",
+        "stars": "92+", "rules_count": "50+",
+        "maintained_by": "P4T12ICK", "tier": "community", "format": "sigma",
+        "browseable": False,
+    },
+]
+
+
+@router.get("/sigma-library")
+async def list_sigma_repos():
+    """List available community Sigma rule repositories."""
+    return {"repositories": SIGMA_REPOS}
+
+
+@router.get("/sigma-library/{repo_id}/browse")
+async def browse_sigma_repo(repo_id: str, path: str = "", q: str = ""):
+    """Browse files in a Sigma repository via GitHub API."""
+    import httpx
+
+    repo = next((r for r in SIGMA_REPOS if r["id"] == repo_id), None)
+    if not repo:
+        raise HTTPException(404, detail=f"Repository '{repo_id}' not found")
+
+    if repo_id == "sigmahq":
+        api_path = path or "rules"
+        url = f"https://api.github.com/repos/SigmaHQ/sigma/contents/{api_path}"
+    elif repo_id == "elastic-detection-rules":
+        api_path = path or "rules"
+        url = f"https://api.github.com/repos/elastic/detection-rules/contents/{api_path}"
+    elif repo_id == "hayabusa-rules":
+        api_path = path or "sigma"
+        url = f"https://api.github.com/repos/Yamato-Security/hayabusa-rules/contents/{api_path}"
+    else:
+        return {"files": [], "message": f"Browse not supported for {repo['name']}. Visit {repo['url']} directly."}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers={"Accept": "application/vnd.github.v3+json"})
+            if resp.status_code == 403:
+                return {"files": [], "error": "GitHub API rate limit exceeded. Try again in a minute."}
+            resp.raise_for_status()
+            items = resp.json()
+            files = []
+            for item in (items if isinstance(items, list) else [items]):
+                entry = {
+                    "name": item.get("name", ""),
+                    "path": item.get("path", ""),
+                    "type": item.get("type", ""),
+                    "size": item.get("size", 0),
+                    "download_url": item.get("download_url"),
+                }
+                if q and q.lower() not in entry["name"].lower() and q.lower() not in entry["path"].lower():
+                    continue
+                files.append(entry)
+            files.sort(key=lambda f: (0 if f["type"] == "dir" else 1, f["name"]))
+            return {"files": files, "path": api_path, "repo": repo["name"]}
+    except Exception as exc:
+        return {"files": [], "error": str(exc)}
+
+
+@router.post("/sigma-library/import-url")
+async def import_sigma_from_url(body: dict):
+    """Download a Sigma rule from a GitHub raw URL and import it."""
+    import httpx
+
+    url = body.get("url", "")
+    if not url:
+        raise HTTPException(400, detail="URL is required")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            content = resp.text
+        rules = await _rule_manager.import_rules(content, "sigma")
+        imported = []
+        for r in rules:
+            rule_id = str(uuid.uuid4())
+            _rule_store[rule_id] = {
+                "id": rule_id,
+                "name": r.title or "Imported Sigma Rule",
+                "description": r.description or "",
+                "language": "sigma",
+                "severity": r.severity or "medium",
+                "tags": r.tags,
+                "mitre_techniques": r.mitre_techniques,
+                "raw_text": content,
+                "source": "sigma_library",
+                "source_url": url,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            imported.append({"id": rule_id, "name": r.title})
+        return {"imported": len(imported), "rules": imported}
+    except Exception as exc:
+        raise HTTPException(500, detail=f"Import failed: {exc}")
+
+
 # ── Per-rule CRUD (parameterised routes — must come after all literal paths) ─
 
 @router.get("/{rule_id}")

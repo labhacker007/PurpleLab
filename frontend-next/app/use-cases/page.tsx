@@ -970,8 +970,9 @@ export default function UseCasesPage() {
     setLoading(true)
     setError(null)
     try {
-      const data = await apiGet<UseCase[]>('/api/v2/use-cases?active_only=false')
-      setUseCases(data)
+      const raw = await apiGet<UseCase[] | { use_cases: UseCase[] }>('/api/v2/use-cases?active_only=false')
+      const list = Array.isArray(raw) ? raw : (raw.use_cases ?? [])
+      setUseCases(list)
     } catch {
       setUseCases(SEED_USE_CASES)
     } finally {

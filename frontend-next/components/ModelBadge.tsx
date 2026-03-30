@@ -13,6 +13,7 @@ const PROVIDER_STYLES: Record<LLMProvider, string> = {
   openai: 'bg-green/15 text-green border border-green/30',
   google: 'bg-blue/15 text-blue border border-blue/30',
   ollama: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+  azure_openai: 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30',
 }
 
 const PROVIDER_DOT: Record<LLMProvider, string> = {
@@ -20,6 +21,7 @@ const PROVIDER_DOT: Record<LLMProvider, string> = {
   openai: 'bg-green',
   google: 'bg-blue',
   ollama: 'bg-purple-400',
+  azure_openai: 'bg-cyan-400',
 }
 
 export function ModelBadge({ provider, model, size = 'md' }: ModelBadgeProps) {

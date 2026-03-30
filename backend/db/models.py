@@ -269,6 +269,18 @@ class ModelFunctionConfig(Base):
 
 # ── HITL Approval Requests ───────────────────────────────────────────────────
 
+class ProviderApiKey(Base):
+    """Persisted provider API keys (encrypted at rest)."""
+    __tablename__ = "provider_api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String(50), unique=True)  # anthropic, openai, google, etc.
+    encrypted_key: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(20), default="ui")  # "ui" | "env"
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
 class HITLApprovalRequest(Base):
     """Human-in-the-Loop approval request for a platform action."""
     __tablename__ = "hitl_approval_requests"

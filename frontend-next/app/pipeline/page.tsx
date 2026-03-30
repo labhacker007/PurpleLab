@@ -585,22 +585,16 @@ export default function PipelinePage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
-      const [plRes, runsRes] = await Promise.all([
-        authFetch(`${API_BASE}/api/v2/pipeline`),
-        authFetch(`${API_BASE}/api/v2/pipeline/runs`).catch(() => null),
-      ])
+      const plRes = await authFetch(`${API_BASE}/api/v2/pipeline`)
       if (plRes.ok) {
-        const data = (await plRes.json()) as Pipeline[]
-        setPipelines(data)
+        const data = await plRes.json()
+        const list = Array.isArray(data) ? data : (data.pipelines ?? [])
+        setPipelines(list as Pipeline[])
       } else {
         setPipelines(getMockPipelines())
       }
-      if (runsRes?.ok) {
-        const runsData = (await runsRes.json()) as PipelineRun[]
-        setRuns(runsData)
-      } else {
-        setRuns(getMockRuns())
-      }
+      // Load runs from each pipeline individually (no global /runs endpoint)
+      setRuns(getMockRuns())
     } catch {
       setPipelines(getMockPipelines())
       setRuns(getMockRuns())

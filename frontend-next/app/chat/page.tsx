@@ -541,8 +541,9 @@ export default function ChatPage() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const data = await apiGet<Conversation[]>('/api/v2/chat/conversations')
-      setConversations(data)
+      const raw = await apiGet<Conversation[] | { conversations: Conversation[] }>('/api/v2/chat/conversations')
+      const list = Array.isArray(raw) ? raw : (raw.conversations ?? [])
+      setConversations(list)
     } catch {
       // API may not be running — silently ignore
     }
