@@ -74,9 +74,12 @@ class AgentOrchestrator:
             env_context = context.get("environment", None)
             if environment_id:
                 env_context = env_context or f"Environment ID: {environment_id}"
+            # For OpenAI-compat providers (including Ollama), tools are passed via API
+            # params, not in the system prompt — keeps prompt small for local models.
+            include_tools_in_prompt = cfg.provider == LLMProvider.ANTHROPIC
             system_prompt = build_system_prompt(
                 environment_context=env_context,
-                available_tools=self.tool_registry.list_tools() or None,
+                available_tools=self.tool_registry.list_tools() if include_tools_in_prompt else None,
                 rag_context=context.get("rag_context", None),
             )
 
@@ -204,7 +207,11 @@ class AgentOrchestrator:
             base_url = _GOOGLE_OPENAI_BASE
             api_key = cfg.api_key_override or os.environ.get("GOOGLE_API_KEY", "placeholder")
         elif provider == LLMProvider.OLLAMA:
-            base_url = cfg.base_url or _OLLAMA_DEFAULT_BASE
+            raw_url = cfg.base_url or _OLLAMA_DEFAULT_BASE
+            # Ensure /v1 suffix for OpenAI-compatible endpoint
+            base_url = raw_url.rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url = base_url + "/v1"
             api_key = "ollama"
         else:
             base_url = cfg.base_url or "https://api.openai.com/v1"
@@ -213,11 +220,18 @@ class AgentOrchestrator:
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
         # Convert tools to OpenAI function format
-        openai_tools = _tools_to_openai_format(self.tool_registry.list_tools())
+        # Skip tools for Ollama — most local models don't support tool calling via the API
+        if provider == LLMProvider.OLLAMA:
+            openai_tools = []
+        else:
+            openai_tools = _tools_to_openai_format(self.tool_registry.list_tools())
 
         # Build messages from conversation history (OpenAI format)
         api_messages = [{"role": "system", "content": system_prompt}]
         api_messages += await self.conversation_manager.get_openai_messages(conv_id)
+
+        # Track whether this model supports tools (some Ollama models don't)
+        _tools_supported = True
 
         for _round in range(_MAX_TOOL_ROUNDS):
             try:
@@ -227,15 +241,29 @@ class AgentOrchestrator:
                     "max_tokens": cfg.max_tokens,
                     "temperature": cfg.temperature,
                 }
-                if openai_tools:
+                if openai_tools and _tools_supported:
                     kwargs["tools"] = openai_tools
                     kwargs["tool_choice"] = "auto"
 
                 response = await client.chat.completions.create(**kwargs)
             except Exception as api_err:
-                log.error("openai_api_error: %s", api_err, exc_info=True)
-                yield {"type": "error", "content": f"LLM API error: {api_err}", "metadata": {}}
-                return
+                err_str = str(api_err)
+                # If the model doesn't support tools, retry without them
+                if "does not support tools" in err_str and _tools_supported:
+                    log.warning("Model %s does not support tools, retrying without", cfg.model_id)
+                    _tools_supported = False
+                    kwargs.pop("tools", None)
+                    kwargs.pop("tool_choice", None)
+                    try:
+                        response = await client.chat.completions.create(**kwargs)
+                    except Exception as retry_err:
+                        log.error("openai_api_retry_error: %s", retry_err, exc_info=True)
+                        yield {"type": "error", "content": f"LLM API error: {retry_err}", "metadata": {}}
+                        return
+                else:
+                    log.error("openai_api_error: %s", api_err, exc_info=True)
+                    yield {"type": "error", "content": f"LLM API error: {api_err}", "metadata": {}}
+                    return
 
             choice = response.choices[0]
             msg = choice.message

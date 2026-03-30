@@ -218,7 +218,9 @@ class UnifiedCompletionClient:
             )
 
         if provider == LLMProvider.OLLAMA:
-            base = self._config.base_url or _OLLAMA_DEFAULT_BASE
+            base = (self._config.base_url or _OLLAMA_DEFAULT_BASE).rstrip("/")
+            if not base.endswith("/v1"):
+                base = base + "/v1"
             # Ollama doesn't need a real key but the SDK requires one
             return base, "ollama"
 
