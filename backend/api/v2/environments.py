@@ -152,7 +152,7 @@ async def update_environment(environment_id: str, req: EnvironmentUpdateRequest)
             env.log_sources = {"enabled": req.log_sources}
         if req.settings is not None:
             env.settings = req.settings
-        env.updated_at = datetime.now(timezone.utc)
+        env.updated_at = datetime.utcnow()
 
         await session.commit()
         await session.refresh(env)

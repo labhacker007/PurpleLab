@@ -89,6 +89,7 @@ class Environment(Base):
 
     siem_connections: Mapped[list[SIEMConnection]] = relationship("SIEMConnection", back_populates="environment")
     test_runs: Mapped[list[TestRun]] = relationship("TestRun", back_populates="environment")
+    threat_profiles: Mapped[list["EnvironmentThreatProfile"]] = relationship("EnvironmentThreatProfile", back_populates="environment", cascade="all, delete-orphan")
 
 
 # ── SIEM Connection ──────────────────────────────────────────────────────────
@@ -544,3 +545,514 @@ class Report(Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── Security Simulation Models ─────────────────────────────────────────────────
+
+class SimulatedEndpoint(Base):
+    """Managed endpoints in the simulated EDR environment."""
+    __tablename__ = "simulated_endpoints"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"), nullable=True
+    )
+    hostname: Mapped[str] = mapped_column(String(255))
+    ip_address: Mapped[str] = mapped_column(String(45))
+    os_platform: Mapped[str] = mapped_column(String(50), default="windows")
+    os_version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    edr_vendor: Mapped[str] = mapped_column(String(50), default="crowdstrike")
+    agent_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="online")  # online | isolated | offline | degraded
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    tags: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    extra: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
+class SimulatedUser(Base):
+    """User accounts in the simulated identity provider (Okta/Entra/AD)."""
+    __tablename__ = "simulated_users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"), nullable=True
+    )
+    username: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    identity_vendor: Mapped[str] = mapped_column(String(50), default="okta")
+    status: Mapped[str] = mapped_column(String(30), default="active")  # active | locked | disabled | suspended
+    mfa_enrolled: Mapped[bool] = mapped_column(Boolean, default=True)
+    risk_level: Mapped[str] = mapped_column(String(20), default="low")  # low | medium | high | critical
+    last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    attributes: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
+class ContainmentAction(Base):
+    """Immutable audit log of every containment action executed in the simulation."""
+    __tablename__ = "containment_actions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="SET NULL"), nullable=True
+    )
+    # isolate_host | release_host | block_hash | block_process | block_ip
+    # block_domain | unblock_ip | unblock_domain | lock_user | unlock_user
+    # disable_user | enable_user | revoke_sessions | force_mfa | run_command
+    action_type: Mapped[str] = mapped_column(String(50))
+    target_type: Mapped[str] = mapped_column(String(30))  # endpoint | user | ip | domain | hash | process
+    target_value: Mapped[str] = mapped_column(String(500))
+    target_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    requester: Mapped[str] = mapped_column(String(255), default="api")
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="success")  # success | failed | pending | reversed
+    result_detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    reversed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reversed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+class BlockListEntry(Base):
+    """Active block list entries across all simulated security controls.
+
+    Covers IP (firewall), domain (proxy/DNS), file hash (EDR/AV), process name.
+    """
+    __tablename__ = "block_list_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"), nullable=True
+    )
+    block_type: Mapped[str] = mapped_column(String(30))  # ip | domain | hash | process | url
+    value: Mapped[str] = mapped_column(String(500))
+    hash_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # md5 | sha1 | sha256
+    direction: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # inbound | outbound | both
+    vendor: Mapped[str] = mapped_column(String(50), default="crowdstrike")
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    added_by: Mapped[str] = mapped_column(String(255), default="api")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── CMDB — People / HR Directory ─────────────────────────────────────────────
+
+class CMDBPerson(Base):
+    __tablename__ = "cmdb_people"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    employee_id: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(50))
+    department: Mapped[Optional[str]] = mapped_column(String(100))
+    title: Mapped[Optional[str]] = mapped_column(String(150))
+    employment_type: Mapped[str] = mapped_column(String(20), default="employee")
+    manager_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    location: Mapped[Optional[str]] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    hire_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    slack_handle: Mapped[Optional[str]] = mapped_column(String(100))
+    avatar_initials: Mapped[Optional[str]] = mapped_column(String(4))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    hardware_assets: Mapped[list["CMDBHardwareAsset"]] = relationship("CMDBHardwareAsset", back_populates="assigned_to", foreign_keys="CMDBHardwareAsset.assigned_to_id")
+
+
+# ── CMDB — Hardware Assets ────────────────────────────────────────────────────
+
+class CMDBHardwareAsset(Base):
+    __tablename__ = "cmdb_hardware_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    asset_tag: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    make: Mapped[Optional[str]] = mapped_column(String(80))
+    model: Mapped[Optional[str]] = mapped_column(String(150))
+    serial_number: Mapped[Optional[str]] = mapped_column(String(100))
+    purchase_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    warranty_expires: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    os_type: Mapped[Optional[str]] = mapped_column(String(30))
+    os_version: Mapped[Optional[str]] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="assigned")
+    assigned_to_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    assigned_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    location: Mapped[Optional[str]] = mapped_column(String(100))
+    specs: Mapped[Optional[Any]] = mapped_column(JSONB, default=dict)
+    tags: Mapped[Optional[Any]] = mapped_column(JSONB, default=dict)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    assigned_to: Mapped[Optional["CMDBPerson"]] = relationship("CMDBPerson", back_populates="hardware_assets", foreign_keys=[assigned_to_id])
+    vulnerabilities: Mapped[list["VMAssetVulnerability"]] = relationship("VMAssetVulnerability", back_populates="hardware_asset", foreign_keys="VMAssetVulnerability.hardware_asset_id")
+
+
+# ── Product Registry — Cloud Accounts ────────────────────────────────────────
+
+class ProductCloudAccount(Base):
+    __tablename__ = "product_registry_cloud_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    cloud_provider: Mapped[str] = mapped_column(String(10), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(30), default="production")
+    environment: Mapped[str] = mapped_column(String(20), default="prod")
+    region_primary: Mapped[Optional[str]] = mapped_column(String(50))
+    regions: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    technical_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    billing_email: Mapped[Optional[str]] = mapped_column(String(200))
+    monthly_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    tags: Mapped[Optional[Any]] = mapped_column(JSONB, default=dict)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    cloudtrail_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    security_hub_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    products: Mapped[list["ProductRegistryProduct"]] = relationship("ProductRegistryProduct", back_populates="cloud_account", foreign_keys="ProductRegistryProduct.cloud_account_id")
+    cspm_findings: Mapped[list["CSPMFinding"]] = relationship("CSPMFinding", back_populates="cloud_account", foreign_keys="CSPMFinding.cloud_account_id")
+
+
+# ── Product Registry — Products ───────────────────────────────────────────────
+
+class ProductRegistryProduct(Base):
+    __tablename__ = "product_registry_products"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    product_type: Mapped[str] = mapped_column(String(30), default="internal")
+    category: Mapped[Optional[str]] = mapped_column(String(50))
+    tier: Mapped[str] = mapped_column(String(20), default="tier2_important")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    tech_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    team: Mapped[Optional[str]] = mapped_column(String(100))
+    url_production: Mapped[Optional[str]] = mapped_column(String(500))
+    url_staging: Mapped[Optional[str]] = mapped_column(String(500))
+    url_docs: Mapped[Optional[str]] = mapped_column(String(500))
+    url_repo: Mapped[Optional[str]] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    data_classification: Mapped[str] = mapped_column(String(20), default="internal")
+    pii_data: Mapped[bool] = mapped_column(Boolean, default=False)
+    phi_data: Mapped[bool] = mapped_column(Boolean, default=False)
+    pci_data: Mapped[bool] = mapped_column(Boolean, default=False)
+    compliance_frameworks: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    tech_stack: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    deployment_model: Mapped[str] = mapped_column(String(20), default="cloud")
+    cloud_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("product_registry_cloud_accounts.id"), nullable=True)
+    server_names: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    container_names: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    k8s_namespace: Mapped[Optional[str]] = mapped_column(String(100))
+    database_types: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    annual_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    vendor_name: Mapped[Optional[str]] = mapped_column(String(150))
+    vendor_contract_expires: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    sla_uptime_target: Mapped[float] = mapped_column(Float, default=99.9)
+    on_call_slack_channel: Mapped[Optional[str]] = mapped_column(String(100))
+    incident_runbook_url: Mapped[Optional[str]] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    cloud_account: Mapped[Optional["ProductCloudAccount"]] = relationship("ProductCloudAccount", back_populates="products", foreign_keys=[cloud_account_id])
+    vulnerabilities: Mapped[list["VMAssetVulnerability"]] = relationship("VMAssetVulnerability", back_populates="product", foreign_keys="VMAssetVulnerability.product_id")
+    cspm_findings: Mapped[list["CSPMFinding"]] = relationship("CSPMFinding", back_populates="product", foreign_keys="CSPMFinding.product_id")
+
+
+# ── Vulnerability Management — CVE Library ────────────────────────────────────
+
+class VMVulnerability(Base):
+    __tablename__ = "vm_vulnerabilities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    cve_id: Mapped[Optional[str]] = mapped_column(String(30), unique=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    cvss_score: Mapped[Optional[float]] = mapped_column(Float)
+    cvss_vector: Mapped[Optional[str]] = mapped_column(String(200))
+    severity: Mapped[str] = mapped_column(String(15), nullable=False)
+    cwe_id: Mapped[Optional[str]] = mapped_column(String(30))
+    affected_component: Mapped[Optional[str]] = mapped_column(String(200))
+    affected_versions: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    fixed_version: Mapped[Optional[str]] = mapped_column(String(100))
+    epss_score: Mapped[float] = mapped_column(Float, default=0.0)
+    cisa_kev: Mapped[bool] = mapped_column(Boolean, default=False)
+    exploit_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    exploit_type: Mapped[Optional[str]] = mapped_column(String(100))
+    attack_vector: Mapped[Optional[str]] = mapped_column(String(20))
+    attack_complexity: Mapped[Optional[str]] = mapped_column(String(10))
+    references: Mapped[Optional[Any]] = mapped_column(JSONB, default=list)
+    nvd_published_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    asset_instances: Mapped[list["VMAssetVulnerability"]] = relationship("VMAssetVulnerability", back_populates="vulnerability", foreign_keys="VMAssetVulnerability.vuln_id")
+
+
+# ── Vulnerability Management — Asset Instances ────────────────────────────────
+
+class VMAssetVulnerability(Base):
+    __tablename__ = "vm_asset_vulnerabilities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    vuln_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("vm_vulnerabilities.id"), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    hardware_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_hardware_assets.id"), nullable=True)
+    product_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("product_registry_products.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    severity_override: Mapped[Optional[str]] = mapped_column(String(15))
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0)
+    assigned_to_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("cmdb_people.id"), nullable=True)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    remediation_due_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    scan_source: Mapped[Optional[str]] = mapped_column(String(50))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    vulnerability: Mapped["VMVulnerability"] = relationship("VMVulnerability", back_populates="asset_instances", foreign_keys=[vuln_id])
+    hardware_asset: Mapped[Optional["CMDBHardwareAsset"]] = relationship("CMDBHardwareAsset", back_populates="vulnerabilities", foreign_keys=[hardware_asset_id])
+    product: Mapped[Optional["ProductRegistryProduct"]] = relationship("ProductRegistryProduct", back_populates="vulnerabilities", foreign_keys=[product_id])
+
+
+# ── CSPM — Check Catalog ──────────────────────────────────────────────────────
+
+class CSPMCheck(Base):
+    __tablename__ = "cspm_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    check_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    framework: Mapped[str] = mapped_column(String(30), nullable=False)
+    cloud_provider: Mapped[Optional[str]] = mapped_column(String(10))
+    section: Mapped[Optional[str]] = mapped_column(String(50))
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    remediation_steps: Mapped[Optional[str]] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(15), nullable=False)
+    automated: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    findings: Mapped[list["CSPMFinding"]] = relationship("CSPMFinding", back_populates="check", foreign_keys="CSPMFinding.check_id")
+
+
+# ── CSPM — Findings ───────────────────────────────────────────────────────────
+
+class CSPMFinding(Base):
+    __tablename__ = "cspm_findings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    check_id: Mapped[int] = mapped_column(Integer, ForeignKey("cspm_checks.id"), nullable=False)
+    cloud_account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("product_registry_cloud_accounts.id"), nullable=False)
+    product_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("product_registry_products.id"), nullable=True)
+    resource_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    resource_type: Mapped[Optional[str]] = mapped_column(String(100))
+    resource_name: Mapped[Optional[str]] = mapped_column(String(300))
+    region: Mapped[Optional[str]] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    severity: Mapped[str] = mapped_column(String(15), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(300))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    evidence: Mapped[Optional[Any]] = mapped_column(JSONB, default=dict)
+    remediation_effort: Mapped[str] = mapped_column(String(10), default="low")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    suppressed_reason: Mapped[Optional[str]] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    check: Mapped["CSPMCheck"] = relationship("CSPMCheck", back_populates="findings", foreign_keys=[check_id])
+    cloud_account: Mapped["ProductCloudAccount"] = relationship("ProductCloudAccount", back_populates="cspm_findings", foreign_keys=[cloud_account_id])
+    product: Mapped[Optional["ProductRegistryProduct"]] = relationship("ProductRegistryProduct", back_populates="cspm_findings", foreign_keys=[product_id])
+
+
+# ── Environment Templates ────────────────────────────────────────────────────
+
+class EnvironmentTemplate(Base):
+    """Pre-built environment topology templates (K8s, CSPM, VM, HR, etc.)."""
+    __tablename__ = "environment_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(100), unique=True)
+    category: Mapped[str] = mapped_column(String(50))  # cspm, k8s, vm, cmdb, hr, asm, product
+    description: Mapped[str] = mapped_column(Text, default="")
+    topology: Mapped[dict] = mapped_column(JSONB, default=dict)  # nodes + edges for ReactFlow
+    default_log_sources: Mapped[list] = mapped_column(JSONB, default=list)
+    default_settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    icon: Mapped[Optional[str]] = mapped_column(String(50))
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ── Environment Threat Profile ────────────────────────────────────────────────
+
+class EnvironmentThreatProfile(Base):
+    """Custom threat profiles (CVEs, TTPs, actors) attached to environments."""
+    __tablename__ = "environment_threat_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    environment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"))
+    profile_type: Mapped[str] = mapped_column(String(30))  # cve | ttp | actor | ioc
+    name: Mapped[str] = mapped_column(String(255))
+    data: Mapped[dict] = mapped_column(JSONB, default=dict)  # full profile payload
+    source: Mapped[str] = mapped_column(String(50), default="manual")  # manual | upload | tip_api | mcp
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    environment: Mapped["Environment"] = relationship("Environment", back_populates="threat_profiles")
+
+
+# ── Sigma Rule Library ─────────────────────────────────────────────────────────
+
+class SigmaRuleSource(Base):
+    """Registered open-source Sigma rule repositories."""
+    __tablename__ = "sigma_rule_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255))
+    github_url: Mapped[str] = mapped_column(String(500))
+    github_api_path: Mapped[str] = mapped_column(String(500))  # API path for fetching
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    rule_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    rules: Mapped[list["SigmaLibraryRule"]] = relationship("SigmaLibraryRule", back_populates="source")
+
+
+class SigmaLibraryRule(Base):
+    """Sigma rule stored locally from open-source repos."""
+    __tablename__ = "sigma_library_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("sigma_rule_sources.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str] = mapped_column(Text, default="")
+    rule_yaml: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="stable")  # stable|experimental|deprecated
+    level: Mapped[str] = mapped_column(String(20), default="medium")  # critical|high|medium|low|informational
+    category: Mapped[Optional[str]] = mapped_column(String(100))
+    product: Mapped[Optional[str]] = mapped_column(String(100))
+    service: Mapped[Optional[str]] = mapped_column(String(100))
+    technique_ids: Mapped[list] = mapped_column(JSONB, default=list)  # ["T1059", ...]
+    tags: Mapped[list] = mapped_column(JSONB, default=list)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500))
+    sha256: Mapped[Optional[str]] = mapped_column(String(64))  # for dedup
+    added_by: Mapped[Optional[str]] = mapped_column(String(255))  # null = synced, email = manual
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    source: Mapped[Optional["SigmaRuleSource"]] = relationship("SigmaRuleSource", back_populates="rules")
+
+
+class SessionSigmaRule(Base):
+    """Rules deployed to a specific simulation session."""
+    __tablename__ = "session_sigma_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("simulation_sessions.id", ondelete="CASCADE"))
+    sigma_rule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sigma_library_rules.id", ondelete="CASCADE"))
+    deployed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    deployed_by: Mapped[Optional[str]] = mapped_column(String(255))
+
+    rule: Mapped["SigmaLibraryRule"] = relationship("SigmaLibraryRule")
+
+
+# ── Data Normalization Schemas ────────────────────────────────────────────────
+
+class NormalizationSchema(Base):
+    """SIEM data normalization / field mapping schema with versioning."""
+    __tablename__ = "normalization_schemas"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    version_label: Mapped[str] = mapped_column(String(100))  # user-defined e.g. "Splunk CIM v4.2"
+    siem_platform: Mapped[str] = mapped_column(String(50))  # splunk|elastic|sentinel|qradar|sumo|custom
+    description: Mapped[str] = mapped_column(Text, default="")
+    fields: Mapped[list] = mapped_column(JSONB, default=list)  # [{name, siem_name, type, description, example}]
+    datasets: Mapped[list] = mapped_column(JSONB, default=list)  # dataset/index names
+    data_models: Mapped[list] = mapped_column(JSONB, default=list)  # data model definitions
+    ai_parsed: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_parse_notes: Mapped[Optional[str]] = mapped_column(Text)
+    source_file_name: Mapped[Optional[str]] = mapped_column(String(255))
+    source_format: Mapped[Optional[str]] = mapped_column(String(20))  # json|csv|tsv|pdf
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    versions: Mapped[list["NormalizationSchemaVersion"]] = relationship("NormalizationSchemaVersion", back_populates="schema", order_by="NormalizationSchemaVersion.version_num.desc()")
+
+
+class NormalizationSchemaVersion(Base):
+    """Immutable snapshot of a normalization schema at a point in time."""
+    __tablename__ = "normalization_schema_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    schema_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("normalization_schemas.id", ondelete="CASCADE"))
+    version_num: Mapped[int] = mapped_column(Integer, default=1)
+    version_label: Mapped[str] = mapped_column(String(100))
+    fields_snapshot: Mapped[list] = mapped_column(JSONB, default=list)
+    datasets_snapshot: Mapped[list] = mapped_column(JSONB, default=list)
+    data_models_snapshot: Mapped[list] = mapped_column(JSONB, default=list)
+    change_summary: Mapped[Optional[str]] = mapped_column(Text)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    schema: Mapped["NormalizationSchema"] = relationship("NormalizationSchema", back_populates="versions")
+
+
+# ── LLM Usage Log ─────────────────────────────────────────────────────────────
+
+class LLMUsageLog(Base):
+    """Per-call LLM usage tracking for cost monitoring and auditing."""
+    __tablename__ = "llm_usage_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    function_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="success")  # success|error|cached
+    error_msg: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    request_context: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── AI Guardrail Config ───────────────────────────────────────────────────────
+
+class AIGuardrailConfig(Base):
+    """Per-function AI guardrail configuration."""
+    __tablename__ = "ai_guardrail_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    function_name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_input_tokens: Mapped[int] = mapped_column(Integer, default=32000)
+    max_output_tokens: Mapped[int] = mapped_column(Integer, default=8192)
+    rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=60)  # 0 = unlimited
+    block_patterns: Mapped[list] = mapped_column(JSONB, default=list)
+    require_json_output: Mapped[bool] = mapped_column(Boolean, default=False)
+    pii_masking_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    system_prompt_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())

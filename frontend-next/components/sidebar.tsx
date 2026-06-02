@@ -20,6 +20,11 @@ import {
   Target,
   TrendingUp,
   Database,
+  Upload,
+  LayoutTemplate,
+  BookMarked,
+  GitBranch,
+  Brain,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -36,6 +41,10 @@ const navItems = [
   { href: "/sessions", label: "Sessions", icon: Activity },
   { href: "/rules", label: "Rules", icon: FileText },
   { href: "/use-cases", label: "Use Cases", icon: ClipboardCheck },
+  { href: "/environments/templates", label: "Env Templates", icon: LayoutTemplate },
+  { href: "/threat-profiles", label: "Threat Profiles", icon: Target },
+  { href: "/sigma-library", label: "Sigma Library", icon: BookMarked },
+  { href: "/normalization", label: "Normalization", icon: GitBranch },
   { href: "/threat-intel", label: "Threat Intel", icon: Shield },
   { href: "/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/reports", label: "Reports", icon: BarChart3 },
@@ -96,13 +105,45 @@ export function Sidebar() {
             href="/admin"
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              pathname === "/admin" || pathname.startsWith("/admin/")
+              pathname === "/admin" || (pathname.startsWith("/admin/") && !pathname.startsWith("/admin/import"))
                 ? "bg-violet-500/10 text-violet-400"
                 : "text-muted hover:text-text hover:bg-bg"
             )}
           >
             <ShieldCheck className="h-4 w-4 shrink-0" />
             {!sidebarCollapsed && <span>Admin</span>}
+          </Link>
+        )}
+
+        {/* AI Engine link — admin and engineer */}
+        {(user?.role === "admin" || user?.role === "engineer") && (
+          <Link
+            href="/admin/ai-engine"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              pathname === "/admin/ai-engine"
+                ? "bg-violet-500/10 text-violet-400"
+                : "text-muted hover:text-text hover:bg-bg"
+            )}
+          >
+            <Brain className="h-4 w-4 shrink-0" />
+            {!sidebarCollapsed && <span>AI Engine</span>}
+          </Link>
+        )}
+
+        {/* Import link — admin and engineer */}
+        {(user?.role === "admin" || user?.role === "engineer") && (
+          <Link
+            href="/admin/import"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              pathname === "/admin/import"
+                ? "bg-violet-500/10 text-violet-400"
+                : "text-muted hover:text-text hover:bg-bg"
+            )}
+          >
+            <Upload className="h-4 w-4 shrink-0" />
+            {!sidebarCollapsed && <span>Import Data</span>}
           </Link>
         )}
       </nav>

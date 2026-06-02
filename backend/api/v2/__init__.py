@@ -24,6 +24,20 @@ from backend.api.v2.reports import router as reports_router
 from backend.api.v2.tasks import router as tasks_router
 from backend.api.v2.notifications import router as notifications_router
 from backend.joti.webhook import router as joti_webhook_router
+from backend.api.v2.edr import router as edr_router
+from backend.api.v2.identity_sim import router as identity_router
+from backend.api.v2.network_controls import router as network_controls_router
+from backend.api.v2.mcp_endpoint import router as mcp_router
+from backend.api.v2.cmdb import router as cmdb_router
+from backend.api.v2.product_registry import router as product_registry_router
+from backend.api.v2.vulnerability_mgmt import router as vm_router
+from backend.api.v2.cspm import router as cspm_router
+from backend.api.v2.enterprise_import import router as enterprise_import_router
+from backend.api.v2.environment_templates import router as environment_templates_router
+from backend.api.v2.threat_profiles import router as threat_profiles_router
+from backend.api.v2.sigma_library import router as sigma_library_router
+from backend.api.v2.normalization import router as normalization_router
+from backend.api.v2.ai_engine import router as ai_engine_router
 
 v2_router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -73,3 +87,24 @@ v2_router.include_router(reports_router)
 v2_router.include_router(tasks_router)
 v2_router.include_router(notifications_router)
 v2_router.include_router(joti_webhook_router)
+# Security simulation APIs
+v2_router.include_router(edr_router)
+v2_router.include_router(identity_router)
+v2_router.include_router(network_controls_router)
+# MCP server
+v2_router.include_router(mcp_router)
+# CMDB & Product Registry
+v2_router.include_router(cmdb_router)
+v2_router.include_router(product_registry_router)
+# Vulnerability Management & CSPM
+v2_router.include_router(vm_router)
+v2_router.include_router(cspm_router)
+# Enterprise data import
+v2_router.include_router(enterprise_import_router)
+# Environment templates, threat profiles, sigma library, normalization
+v2_router.include_router(environment_templates_router)
+v2_router.include_router(threat_profiles_router)
+v2_router.include_router(sigma_library_router)
+v2_router.include_router(normalization_router)
+# AI Engine management
+v2_router.include_router(ai_engine_router)

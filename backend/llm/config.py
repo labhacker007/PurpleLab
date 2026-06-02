@@ -46,6 +46,21 @@ class LLMFunction(str, Enum):
     HITL_REVIEW = "HITL_REVIEW"
     """Human-in-the-loop decision summarization and suggestions."""
 
+    NORMALIZATION_PARSE = "NORMALIZATION_PARSE"
+    """Parse SIEM schema documents to extract structured field definitions."""
+
+    DETECTION_GENERATE = "DETECTION_GENERATE"
+    """Generate Sigma detection rules from use case description + normalization schema."""
+
+    THREAT_ENRICH = "THREAT_ENRICH"
+    """Enrich CVE/TTP/threat actor profiles with context, mitigations, related techniques."""
+
+    EXERCISE_REPORT = "EXERCISE_REPORT"
+    """Generate post-exercise reports from session data, coverage deltas, and timeline."""
+
+    COVERAGE_SUGGEST = "COVERAGE_SUGGEST"
+    """Analyse detection gaps and suggest new detection rules to improve coverage."""
+
 
 # Human-readable metadata for the admin UI
 FUNCTION_METADATA: dict[str, dict[str, Any]] = {
@@ -121,6 +136,46 @@ FUNCTION_METADATA: dict[str, dict[str, Any]] = {
         "needs_streaming": False,
         "volume": "low",
         "recommended_tags": ["balanced"],
+    },
+    LLMFunction.NORMALIZATION_PARSE: {
+        "display_name": "Normalization Parse",
+        "description": "Parse SIEM schema documents to extract structured field definitions.",
+        "needs_tools": False,
+        "needs_streaming": False,
+        "volume": "medium",
+        "recommended_tags": ["code", "balanced"],
+    },
+    LLMFunction.DETECTION_GENERATE: {
+        "display_name": "Detection Generate",
+        "description": "Generate Sigma detection rules from use case description + normalization schema.",
+        "needs_tools": False,
+        "needs_streaming": False,
+        "volume": "medium",
+        "recommended_tags": ["code", "reasoning"],
+    },
+    LLMFunction.THREAT_ENRICH: {
+        "display_name": "Threat Enrich",
+        "description": "Enrich CVE/TTP/threat actor profiles with context, mitigations, related techniques.",
+        "needs_tools": False,
+        "needs_streaming": False,
+        "volume": "medium",
+        "recommended_tags": ["balanced", "reasoning"],
+    },
+    LLMFunction.EXERCISE_REPORT: {
+        "display_name": "Exercise Report",
+        "description": "Generate post-exercise reports from session data, coverage deltas, and timeline.",
+        "needs_tools": False,
+        "needs_streaming": False,
+        "volume": "low",
+        "recommended_tags": ["balanced", "frontier"],
+    },
+    LLMFunction.COVERAGE_SUGGEST: {
+        "display_name": "Coverage Suggest",
+        "description": "Analyse detection gaps and suggest new detection rules to improve coverage.",
+        "needs_tools": False,
+        "needs_streaming": False,
+        "volume": "low",
+        "recommended_tags": ["reasoning", "frontier"],
     },
 }
 

@@ -1,9 +1,26 @@
 /**
  * PurpleLab base API client with typed helpers and SSE streaming.
+ * All helpers automatically attach the Bearer token from localStorage.
  */
 
 // Always use relative URLs — Next.js rewrites proxy /api/* to the backend
 export const API_BASE = ''
+
+// Token key — must match the key used in lib/auth.ts
+const TOKEN_KEY = 'pl_access_token'
+
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = getToken()
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  }
+}
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
@@ -22,8 +39,9 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`
     try {
-      const body = (await response.json()) as { error?: string }
-      if (body.error) message = body.error
+      const body = (await response.json()) as { error?: string; detail?: string }
+      if (body.detail) message = body.detail
+      else if (body.error) message = body.error
     } catch {
       // ignore JSON parse error
     }
@@ -35,26 +53,41 @@ async function handleResponse<T>(response: Response): Promise<T> {
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`)
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: authHeaders(),
+  })
   return handleResponse<T>(response)
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  })
+  return handleResponse<T>(response)
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
   return handleResponse<T>(response)
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const response = await fetch(`${API_BASE}${path}`, { method: 'DELETE' })
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
   if (!response.ok) {
     let message = `Delete failed with status ${response.status}`
     try {
-      const body = (await response.json()) as { error?: string }
-      if (body.error) message = body.error
+      const body = (await response.json()) as { error?: string; detail?: string }
+      if (body.detail) message = body.detail
+      else if (body.error) message = body.error
     } catch {
       // ignore
     }
@@ -92,10 +125,7 @@ export async function* streamSSE(
 ): AsyncGenerator<SSEChunk> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
+    headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
     body: JSON.stringify(body),
     signal,
   })

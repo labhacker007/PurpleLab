@@ -1010,12 +1010,11 @@ export default function EnvironmentCanvasPage({
       let nodeData: Record<string, unknown> = {}
       try { nodeData = JSON.parse(rawData) as Record<string, unknown> } catch { return }
 
-      const bounds = reactFlowWrapper.current?.getBoundingClientRect()
-      if (!bounds || !reactFlowInstance.current) return
+      if (!reactFlowInstance.current) return
 
       const position = reactFlowInstance.current.screenToFlowPosition({
-        x: e.clientX - bounds.left,
-        y: e.clientY - bounds.top,
+        x: e.clientX,
+        y: e.clientY,
       })
 
       const newNode: Node = {
