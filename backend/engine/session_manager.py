@@ -40,6 +40,7 @@ _SOURCE_VENDOR_MAP: dict[str, tuple[str, str]] = {
     "okta_identity":     ("okta", "identity"),
     "firewall":          ("palo_alto", "ngfw"),
     "palo_alto":         ("palo_alto", "ngfw"),
+    "fortinet":          ("fortinet", "fortigate"),
     "dns":               ("crowdstrike", "dns"),
     "cloudtrail":        ("aws", "cloudtrail"),
     "cloud":             ("aws", "cloudtrail"),
