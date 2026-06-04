@@ -35,6 +35,16 @@ class CrowdStrikeGenerator(BaseGenerator):
                "Defense Evasion", "Credential Access", "Discovery", "Lateral Movement",
                "Collection", "Command and Control", "Exfiltration", "Impact"]
 
+    def _pick_technique(self):
+        """Pick a technique, respecting forced_technique_ids from custom_config."""
+        forced = (self.config.custom_config or {}).get("forced_technique_ids")
+        if forced:
+            from backend.engine.generators.base import MITRE_TECHNIQUES
+            name_map = dict(MITRE_TECHNIQUES)
+            tid = random.choice(forced)
+            return tid, name_map.get(tid, tid)
+        return super()._pick_technique()
+
     def generate(self) -> dict:
         severity = self._pick_severity()
         sev = self.SEVERITY_MAP[severity]

@@ -16,6 +16,10 @@ from backend.engine.generators.entra_id import EntraIDGenerator
 from backend.engine.generators.qradar import QRadarGenerator
 from backend.engine.generators.elastic import ElasticGenerator
 from backend.engine.generators.guardduty import GuardDutyGenerator
+from backend.engine.generators.asm import ASMGenerator
+from backend.engine.generators.cmdb import CMDBGenerator
+from backend.engine.generators.cspm import CSPMGenerator
+from backend.engine.generators.product_registry import ProductRegistryGenerator
 
 GENERATOR_REGISTRY: dict[str, type[BaseGenerator]] = {
     "splunk": SplunkGenerator,
@@ -30,6 +34,10 @@ GENERATOR_REGISTRY: dict[str, type[BaseGenerator]] = {
     "qradar": QRadarGenerator,
     "elastic": ElasticGenerator,
     "guardduty": GuardDutyGenerator,
+    "asm": ASMGenerator,
+    "cmdb": CMDBGenerator,
+    "cspm": CSPMGenerator,
+    "product_registry": ProductRegistryGenerator,
 }
 
 __all__ = ["GENERATOR_REGISTRY", "BaseGenerator", "GeneratorConfig"]

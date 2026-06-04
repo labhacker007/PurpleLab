@@ -71,6 +71,15 @@ class GuardrailUpdateRequest(BaseModel):
     notes: str = ""
 
 
+class FunctionConfigUpdateRequest(BaseModel):
+    provider: str = Field(..., description="anthropic|openai|ollama|google")
+    model_id: str = Field(..., description="e.g. claude-sonnet-4-6")
+    temperature: float = Field(0.3, ge=0.0, le=2.0)
+    max_tokens: int = Field(4096, ge=256, le=200000)
+    base_url: str = Field("", description="Required for Ollama; optional for Azure")
+    api_key_override: str = Field("", description="Override API key; empty = use env var")
+
+
 class GenerateDetectionRequest(BaseModel):
     # Primary fields (also accept legacy aliases)
     use_case_name: str = ""
@@ -296,6 +305,49 @@ async def list_functions(
         })
 
     return {"functions": functions, "total": len(functions)}
+
+
+# ---------------------------------------------------------------------------
+# PUT /ai-engine/functions/{function_name}
+# ---------------------------------------------------------------------------
+
+@router.put("/functions/{function_name}", dependencies=[Depends(require_role("admin"))])
+async def update_function_config(
+    function_name: str,
+    body: FunctionConfigUpdateRequest,
+    current_user: Any = Depends(require_role("admin")),
+) -> dict[str, Any]:
+    """Update the provider/model config for a specific AI function."""
+    try:
+        fn = LLMFunction(function_name)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown function: {function_name}")
+
+    llm_router = get_router()
+    from backend.llm.config import ModelConfig
+
+    cfg = ModelConfig(
+        provider=body.provider,
+        model_id=body.model_id,
+        temperature=body.temperature,
+        max_tokens=body.max_tokens,
+        base_url=body.base_url,
+        api_key_override=body.api_key_override,
+    )
+
+    try:
+        result = await llm_router.set_config(fn, cfg)
+    except Exception as exc:
+        logger.error("Failed to update function config %s: %s", function_name, exc)
+        raise HTTPException(status_code=500, detail=f"Config update failed: {exc}")
+
+    meta = FUNCTION_METADATA.get(function_name, {})
+    return {
+        "function_name": function_name,
+        "display_name": meta.get("display_name", function_name),
+        "config": cfg.to_dict(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------

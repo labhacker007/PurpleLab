@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useState } from "react"
 import {
   MessageSquare,
   Server,
@@ -11,6 +12,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   LayoutDashboard,
   Workflow,
   ClipboardCheck,
@@ -25,42 +27,107 @@ import {
   BookMarked,
   GitBranch,
   Brain,
+  Layers,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
 import { useAuthStore } from "@/stores/auth"
 
-const navItems = [
+// ─── Nav group type ─────────────────────────────────────────────────────────
+
+interface NavItem {
+  href: string
+  label: string
+  icon: React.ElementType
+}
+
+interface NavGroup {
+  key: string
+  label: string
+  icon: React.ElementType
+  items: NavItem[]
+}
+
+// ─── Navigation structure ────────────────────────────────────────────────────
+
+const topItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/scoring", label: "Scoring", icon: TrendingUp },
-  { href: "/mitre", label: "MITRE ATT&CK", icon: Target },
-  { href: "/pipeline", label: "Pipeline", icon: Workflow },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/environments", label: "Environments", icon: Server },
-  { href: "/log-sources", label: "Log Sources", icon: Database },
-  { href: "/sessions", label: "Sessions", icon: Activity },
-  { href: "/rules", label: "Rules", icon: FileText },
-  { href: "/use-cases", label: "Use Cases", icon: ClipboardCheck },
-  { href: "/environments/templates", label: "Env Templates", icon: LayoutTemplate },
-  { href: "/threat-profiles", label: "Threat Profiles", icon: Target },
-  { href: "/sigma-library", label: "Sigma Library", icon: BookMarked },
-  { href: "/normalization", label: "Normalization", icon: GitBranch },
-  { href: "/threat-intel", label: "Threat Intel", icon: Shield },
-  { href: "/knowledge", label: "Knowledge", icon: BookOpen },
+  { href: "/pipeline", label: "Pipeline", icon: Workflow },
   { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
 ]
+
+const navGroups: NavGroup[] = [
+  {
+    key: "detect",
+    label: "Detection",
+    icon: Target,
+    items: [
+      { href: "/mitre", label: "MITRE ATT&CK", icon: Target },
+      { href: "/scoring", label: "Scoring", icon: TrendingUp },
+      { href: "/rules", label: "Rules", icon: FileText },
+      { href: "/sigma-library", label: "Sigma Library", icon: BookMarked },
+      { href: "/use-cases", label: "Use Cases", icon: ClipboardCheck },
+      { href: "/normalization", label: "Normalization", icon: GitBranch },
+    ],
+  },
+  {
+    key: "simulate",
+    label: "Simulation",
+    icon: Server,
+    items: [
+      { href: "/environments", label: "Environments", icon: Server },
+      { href: "/environments/templates", label: "Env Templates", icon: LayoutTemplate },
+      { href: "/log-sources", label: "Log Sources", icon: Database },
+      { href: "/sessions", label: "Sessions", icon: Activity },
+      { href: "/scenarios", label: "Scenarios", icon: BookMarked },
+      { href: "/threat-profiles", label: "Threat Profiles", icon: Layers },
+    ],
+  },
+  {
+    key: "intel",
+    label: "Intelligence",
+    icon: Shield,
+    items: [
+      { href: "/threat-intel", label: "Threat Intel", icon: Shield },
+      { href: "/knowledge", label: "Knowledge", icon: BookOpen },
+    ],
+  },
+]
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const pathname = usePathname()
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const user = useAuthStore((s) => s.user)
 
+  // Track which groups are open (default: all open)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    detect: true,
+    simulate: true,
+    intel: true,
+  })
+
+  function toggleGroup(key: string) {
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function isActive(href: string) {
+    return pathname === href || pathname.startsWith(href + "/")
+  }
+
+  const linkClass = (active: boolean) =>
+    cn(
+      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+      active ? "bg-primary/10 text-primary" : "text-muted hover:text-text hover:bg-bg"
+    )
+
   return (
     <aside
       className={cn(
         "flex flex-col border-r border-border bg-card transition-all duration-200",
-        sidebarCollapsed ? "w-16" : "w-[260px]"
+        sidebarCollapsed ? "w-16" : "w-[240px]"
       )}
     >
       {/* Logo */}
@@ -77,35 +144,91 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive =
-            pathname === item.href || pathname.startsWith(item.href + "/")
+      <nav className="flex-1 p-2 overflow-y-auto space-y-0.5">
+        {/* Top-level items */}
+        {topItems.map((item) => {
           const Icon = item.icon
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted hover:text-text hover:bg-bg"
-              )}
-            >
+            <Link key={item.href} href={item.href} className={linkClass(isActive(item.href))}>
               <Icon className="h-4 w-4 shrink-0" />
               {!sidebarCollapsed && <span>{item.label}</span>}
             </Link>
           )
         })}
 
-        {/* Admin link — only visible to admin role */}
+        {/* Grouped sections */}
+        {navGroups.map((group) => {
+          const GroupIcon = group.icon
+          const groupActive = group.items.some((i) => isActive(i.href))
+          const isOpen = openGroups[group.key]
+
+          return (
+            <div key={group.key} className="mt-1">
+              {/* Group header */}
+              {!sidebarCollapsed ? (
+                <button
+                  onClick={() => toggleGroup(group.key)}
+                  className={cn(
+                    "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    groupActive ? "text-primary" : "text-muted hover:text-text hover:bg-bg"
+                  )}
+                >
+                  <GroupIcon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1 text-left">{group.label}</span>
+                  <ChevronDown
+                    className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-180")}
+                  />
+                </button>
+              ) : (
+                // Collapsed: show icon only, clicking expands sidebar
+                <div className="flex justify-center py-2">
+                  <GroupIcon className={cn("h-4 w-4", groupActive ? "text-primary" : "text-muted")} />
+                </div>
+              )}
+
+              {/* Group items */}
+              {!sidebarCollapsed && isOpen && (
+                <div className="ml-3 pl-3 border-l border-border/60 space-y-0.5 mt-0.5 mb-1">
+                  {group.items.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={cn(
+                          "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                          isActive(item.href)
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted hover:text-text hover:bg-bg"
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        <span>{item.label}</span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {/* Divider before admin section */}
+        <div className="border-t border-border/60 my-2" />
+
+        {/* Settings (always visible) */}
+        <Link href="/settings" className={linkClass(isActive("/settings"))}>
+          <Settings className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && <span>Settings</span>}
+        </Link>
+
+        {/* Admin link — admin only */}
         {user?.role === "admin" && (
           <Link
             href="/admin"
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              pathname === "/admin" || (pathname.startsWith("/admin/") && !pathname.startsWith("/admin/import"))
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              pathname === "/admin" || (pathname.startsWith("/admin/") && !pathname.startsWith("/admin/ai-engine") && !pathname.startsWith("/admin/import"))
                 ? "bg-violet-500/10 text-violet-400"
                 : "text-muted hover:text-text hover:bg-bg"
             )}
@@ -115,12 +238,12 @@ export function Sidebar() {
           </Link>
         )}
 
-        {/* AI Engine link — admin and engineer */}
+        {/* AI Engine — admin and engineer */}
         {(user?.role === "admin" || user?.role === "engineer") && (
           <Link
             href="/admin/ai-engine"
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               pathname === "/admin/ai-engine"
                 ? "bg-violet-500/10 text-violet-400"
                 : "text-muted hover:text-text hover:bg-bg"
@@ -131,12 +254,12 @@ export function Sidebar() {
           </Link>
         )}
 
-        {/* Import link — admin and engineer */}
+        {/* Import Data — admin and engineer */}
         {(user?.role === "admin" || user?.role === "engineer") && (
           <Link
             href="/admin/import"
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               pathname === "/admin/import"
                 ? "bg-violet-500/10 text-violet-400"
                 : "text-muted hover:text-text hover:bg-bg"

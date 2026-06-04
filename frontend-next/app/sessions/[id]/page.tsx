@@ -17,6 +17,10 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
+  Pencil,
+  Check,
+  X,
+  BookMarked,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -106,19 +110,23 @@ const MAX_EVENTS = 500
 function EventRow({ event }: { event: LiveEvent }) {
   const [expanded, setExpanded] = useState(false)
   const cfg = sevCfg(event.severity)
+  const p = event.payload
+  const isAttack = p?._type === 'attack' || (p?._attack === true)
+  const isBenign = p?._type === 'baseline' || (p?._benign === true)
+  const indexName = p?._index as string | undefined
+  const sourcetype = p?._sourcetype as string | undefined
 
   // Get first meaningful line from payload
   const payloadSummary = (() => {
-    const p = event.payload
     if (!p || Object.keys(p).length === 0) return ''
-    const msg = p.message ?? p.msg ?? p.description ?? p.title ?? p.event_data ?? p.raw
+    const msg = p.event_title ?? p.message ?? p.msg ?? p.description ?? p.title ?? p.event_data ?? p.raw
     if (msg) return String(msg).slice(0, 120)
-    const firstVal = Object.values(p)[0]
+    const firstVal = Object.values(p).find(v => typeof v === 'string' && (v as string).length > 2 && !(v as string).startsWith('_'))
     return firstVal ? String(firstVal).slice(0, 120) : ''
   })()
 
   return (
-    <div className="border-b border-border/40 last:border-0">
+    <div className={cn("border-b border-border/40 last:border-0", isAttack && "bg-red-500/5")}>
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-bg/50 transition-colors group"
@@ -144,17 +152,24 @@ function EventRow({ event }: { event: LiveEvent }) {
           {cfg.label}
         </span>
 
-        {/* Source badge */}
-        {event.source_type && (
+        {/* Index badge — shows SIEM index name */}
+        {indexName && (
           <span className="shrink-0 inline-flex items-center rounded bg-card border border-border px-1.5 py-0 text-[10px] font-mono text-muted leading-5">
-            {event.source_type}
+            {indexName}
           </span>
         )}
 
-        {/* Technique badge */}
-        {event.technique_id && (
-          <span className="shrink-0 inline-flex items-center rounded bg-primary/10 border border-primary/20 px-1.5 py-0 text-[10px] font-mono text-primary leading-5">
-            {event.technique_id}
+        {/* Sourcetype badge */}
+        {sourcetype && (
+          <span className="shrink-0 hidden sm:inline-flex items-center rounded bg-muted/60 border border-border/60 px-1.5 py-0 text-[10px] font-mono text-muted leading-5 max-w-[180px] truncate">
+            {sourcetype}
+          </span>
+        )}
+
+        {/* Attack type indicator */}
+        {isAttack && (
+          <span className="shrink-0 inline-flex items-center rounded bg-red-500/15 border border-red-500/30 px-1.5 py-0 text-[10px] font-mono text-red-400 leading-5">
+            ⚡ {event.technique_id || 'ATK'}
           </span>
         )}
 
@@ -167,8 +182,31 @@ function EventRow({ event }: { event: LiveEvent }) {
       {/* Expanded payload */}
       {expanded && (
         <div className="mx-3 mb-2 rounded-lg border border-border bg-bg overflow-hidden">
+          {(indexName || sourcetype) && (
+            <div className="flex items-center gap-3 border-b border-border/60 px-3 py-1.5 bg-muted/30">
+              {indexName && (
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  <span className="text-foreground/50">index=</span>{indexName}
+                </span>
+              )}
+              {sourcetype && (
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  <span className="text-foreground/50">sourcetype=</span>{sourcetype}
+                </span>
+              )}
+              {p?._component != null && (
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  <span className="text-foreground/50">component=</span>{String(p._component)}
+                </span>
+              )}
+            </div>
+          )}
           <pre className="text-[11px] font-mono text-text/80 p-3 overflow-x-auto max-h-80 leading-relaxed">
-            {JSON.stringify(event.payload, null, 2)}
+            {JSON.stringify(
+              // Filter internal _ fields from display
+              Object.fromEntries(Object.entries(p || {}).filter(([k]) => !k.startsWith('_'))),
+              null, 2
+            )}
           </pre>
         </div>
       )}
@@ -178,16 +216,26 @@ function EventRow({ event }: { event: LiveEvent }) {
 
 // ─── Stats panel ──────────────────────────────────────────────────────────────
 
-function StatsPanel({ stats, session }: { stats: StatsState; session: Session | null }) {
+function StatsPanel({ stats, session, events }: { stats: StatsState; session: Session | null; events: LiveEvent[] }) {
+  const attackCount = events.filter(e => e.payload?._type === 'attack' || e.payload?._attack).length
+  const benignCount = events.filter(e => e.payload?._type === 'baseline' || e.payload?._benign).length
+
   return (
     <div className="w-[220px] shrink-0 space-y-4">
-      {/* Total */}
+      {/* Total + attack/benign breakdown */}
       <Card>
         <CardContent className="p-4 text-center">
           <div className="text-3xl font-bold font-mono text-text tabular-nums">
             {stats.total.toLocaleString()}
           </div>
           <div className="text-xs text-muted mt-1">Total Events</div>
+          {(attackCount > 0 || benignCount > 0) && (
+            <div className="mt-2 flex gap-2 justify-center text-[10px] font-mono">
+              <span className="text-red-400">⚡ {attackCount} attack</span>
+              <span className="text-muted">·</span>
+              <span className="text-green-500/80">{benignCount} baseline</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -295,6 +343,9 @@ export default function SessionDetailPage() {
   const [sourceFilter, setSourceFilter] = useState<string>('')
   const [techniqueFilter, setTechniqueFilter] = useState<string>('')
   const [isStopping, setIsStopping] = useState(false)
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   const feedRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -531,6 +582,70 @@ export default function SessionDetailPage() {
     }
   }
 
+  // ── Save as scenario ──────────────────────────────────────────────────────────
+  const [isSavingScenario, setIsSavingScenario] = useState(false)
+  async function handleSaveAsScenario() {
+    if (!session || isSavingScenario) return
+    setIsSavingScenario(true)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v2/sessions/${session.id}/save-as-scenario`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        router.push('/scenarios')
+      }
+    } catch { /* ignore */ }
+    finally { setIsSavingScenario(false) }
+  }
+
+  // ── Start stopped session ─────────────────────────────────────────────────────
+  const [isStarting, setIsStarting] = useState(false)
+  async function handleStart() {
+    if (!session || isStarting) return
+    setIsStarting(true)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v2/sessions/${session.id}/start`, { method: 'POST' })
+      if (res.ok) {
+        setSession((s) => s ? { ...s, status: 'running' } : s)
+        startStream(null)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  // ── Rename session ────────────────────────────────────────────────────────────
+  function startRename() {
+    setRenameValue(session?.name ?? '')
+    setIsRenaming(true)
+    setTimeout(() => renameInputRef.current?.select(), 30)
+  }
+
+  async function commitRename() {
+    const trimmed = renameValue.trim()
+    if (!trimmed || !session) { setIsRenaming(false); return }
+    try {
+      const res = await authFetch(`${API_BASE}/api/v2/sessions/${session.id}/rename`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      })
+      if (res.ok) {
+        setSession((s) => s ? { ...s, name: trimmed } : s)
+      }
+    } catch { /* ignore */ }
+    setIsRenaming(false)
+  }
+
+  function cancelRename() {
+    setIsRenaming(false)
+    setRenameValue('')
+  }
+
   // ── Export ────────────────────────────────────────────────────────────────────
   function handleExport(format: 'json' | 'csv') {
     if (format === 'json') {
@@ -605,7 +720,46 @@ export default function SessionDetailPage() {
           </Link>
           <div>
             <div className="flex items-center gap-2.5">
-              <h1 className="text-lg font-bold text-text">{session.name}</h1>
+              {isRenaming ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={renameInputRef}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void commitRename()
+                      if (e.key === 'Escape') cancelRename()
+                    }}
+                    className="text-lg font-bold text-text bg-bg border border-primary/50 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary/50 min-w-[200px]"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => void commitRename()}
+                    className="p-1 rounded text-green hover:bg-green/10 transition-colors"
+                    title="Save"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={cancelRename}
+                    className="p-1 rounded text-muted hover:text-text hover:bg-bg transition-colors"
+                    title="Cancel"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 group/title">
+                  <h1 className="text-lg font-bold text-text">{session.name}</h1>
+                  <button
+                    onClick={startRename}
+                    className="opacity-0 group-hover/title:opacity-100 p-1 rounded text-muted hover:text-text hover:bg-bg transition-all"
+                    title="Rename session"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
               <span className={cn('flex items-center gap-1 text-xs font-mono font-semibold', sCfg.color)}>
                 {sCfg.icon}
                 {sCfg.label}
@@ -624,13 +778,40 @@ export default function SessionDetailPage() {
           {session.status === 'running' && (
             <Button
               size="sm"
-             
+
               onClick={() => void handleStop()}
               disabled={isStopping}
               className="text-red border-red/30 hover:bg-red/10 hover:text-red"
             >
               {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
               Stop
+            </Button>
+          )}
+          {(session.status === 'stopped' || session.status === 'failed') && (
+            <Button
+              size="sm"
+              onClick={() => void handleStart()}
+              disabled={isStarting}
+              className="bg-violet-600 hover:bg-violet-500 text-white border-0"
+            >
+              {isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              Start
+            </Button>
+          )}
+          {(session.status === 'completed' || (session.status !== 'running' && events.length > 0)) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleSaveAsScenario()}
+              disabled={isSavingScenario}
+              className="gap-1.5 text-xs"
+            >
+              {isSavingScenario ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <BookMarked className="h-3.5 w-3.5" />
+              )}
+              Save as Scenario
             </Button>
           )}
           <div className="relative group">
@@ -659,7 +840,7 @@ export default function SessionDetailPage() {
       {/* Main layout */}
       <div className="flex gap-4 flex-1 min-h-0">
         {/* Stats panel */}
-        <StatsPanel stats={stats} session={session} />
+        <StatsPanel stats={stats} session={session} events={events} />
 
         {/* Event feed */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -775,13 +956,33 @@ export default function SessionDetailPage() {
               className="flex-1 overflow-y-auto font-mono text-sm min-h-0"
             >
               {filteredEvents.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-32 text-muted">
-                  <Activity className="h-8 w-8 mb-2 opacity-30" />
-                  <p className="text-xs">
-                    {session.status === 'running'
-                      ? 'Waiting for events...'
-                      : 'No events to display'}
-                  </p>
+                <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted">
+                  {session.status === 'running' ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary/60" />
+                        <span className="text-xs font-medium text-foreground/60">Generating simulation events with AI</span>
+                      </div>
+                      <p className="text-[11px] text-muted/70 text-center max-w-[260px]">
+                        The LLM is building realistic SIEM telemetry.<br />
+                        First events will appear shortly…
+                      </p>
+                      <div className="flex gap-1">
+                        {[0.2, 0.4, 0.6, 0.8, 1.0].map((d) => (
+                          <span
+                            key={d}
+                            className="h-1 w-6 rounded-full bg-primary/20 animate-pulse"
+                            style={{ animationDelay: `${d}s` }}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Activity className="h-8 w-8 opacity-30" />
+                      <p className="text-xs">No events to display</p>
+                    </>
+                  )}
                 </div>
               ) : (
                 filteredEvents.map((event) => <EventRow key={event.id} event={event} />)

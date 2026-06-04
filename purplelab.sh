@@ -259,8 +259,12 @@ setup_env() {
                   python -c "import secrets; print(secrets.token_urlsafe(32))" 2>/dev/null || \
                   echo "$(LC_ALL=C tr -dc 'A-Za-z0-9_-' </dev/urandom 2>/dev/null | head -c 43)=")
 
+        # Generate MCP API key (used by Claude Desktop, VS Code, Cursor, Joti)
+        local mcp_key
+        mcp_key="purplelab-$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo "$(date +%s%N | sha256sum | head -c 32)")"
+
         cat > "$ENV_FILE" << ENVEOF
-# ── PurpleLabulator v2 Configuration ──────────────────────────────────────────
+# ── PurpleLab v2 Configuration ────────────────────────────────────────────────
 # Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 # Database
@@ -282,6 +286,18 @@ DEBUG=true
 
 # Encryption key for SIEM credentials
 ENCRYPTION_KEY=${enc_key}
+
+# ── MCP Server ────────────────────────────────────────────────────────────────
+# API key for MCP clients (Claude Desktop, VS Code, Cursor, Joti, custom tools)
+# Change this after first run to a value you control.
+PURPLELAB_MCP_API_KEY=${mcp_key}
+PURPLELAB_BACKEND_PORT=8002
+PURPLELAB_FRONTEND_PORT=3002
+
+# Joti auto-registration (set both to enable auto-register on startup)
+# JOTI_BASE_URL=http://localhost:8000
+# JOTI_API_KEY=
+PURPLELAB_MCP_AUTO_REGISTER_JOTI=false
 ENVEOF
 
         ok "Generated .env with secure random passwords"

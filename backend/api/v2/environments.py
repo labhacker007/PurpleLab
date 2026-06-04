@@ -89,6 +89,33 @@ async def create_environment(req: EnvironmentCreateRequest):
     return await _env_to_dict(env)
 
 
+@router.get("/catalog/products")
+async def get_product_catalog_route():
+    """Return the full product catalog — all vendor options per category.
+
+    Used by the environment builder UI to let users select which security
+    products they have deployed (e.g., CrowdStrike for EDR, Palo Alto for firewall).
+    """
+    from backend.engine.product_catalog import PRODUCT_CATALOG, DEFAULT_VENDORS
+
+    result = {}
+    for category, vendors in PRODUCT_CATALOG.items():
+        result[category] = {
+            "default": DEFAULT_VENDORS.get(category, ""),
+            "vendors": [
+                {
+                    "vendor": vendor_key,
+                    "display": info.get("display", vendor_key),
+                    "index": info.get("index", ""),
+                    "sourcetype": info.get("sourcetype", ""),
+                    "log_format": info.get("log_format", ""),
+                }
+                for vendor_key, info in vendors.items()
+            ],
+        }
+    return result
+
+
 @router.get("/{environment_id}")
 async def get_environment(environment_id: str):
     """Get environment details with SIEM connections and recent test runs."""
@@ -180,6 +207,80 @@ async def delete_environment(environment_id: str):
         await session.commit()
 
     return {"status": "deleted", "id": environment_id}
+
+
+@router.put("/{environment_id}/products")
+async def update_environment_products(environment_id: str, products: dict[str, str]):
+    """Update the product selections for an environment.
+
+    Accepts a dict mapping category → vendor key, e.g.:
+      {"edr": "crowdstrike", "firewall": "palo_alto", "cloud": "aws"}
+
+    Stores under environment.settings.products.
+    """
+    async with async_session() as session:
+        try:
+            uid = uuid.UUID(environment_id)
+        except ValueError:
+            raise HTTPException(400, detail="Invalid environment ID.")
+
+        result = await session.execute(
+            select(Environment).where(Environment.id == uid)
+        )
+        env = result.scalar_one_or_none()
+        if not env:
+            raise HTTPException(404, detail="Environment not found.")
+
+        settings = dict(env.settings or {})
+        settings["products"] = products
+        env.settings = settings
+        env.updated_at = datetime.utcnow()
+        await session.commit()
+        await session.refresh(env)
+
+    return {
+        "environment_id": environment_id,
+        "products": products,
+        "message": "Product selections saved. Simulations will now use vendor-specific log schemas.",
+    }
+
+
+@router.get("/{environment_id}/products")
+async def get_environment_products(environment_id: str):
+    """Get the current product selections for an environment."""
+    async with async_session() as session:
+        try:
+            uid = uuid.UUID(environment_id)
+        except ValueError:
+            raise HTTPException(400, detail="Invalid environment ID.")
+
+        result = await session.execute(
+            select(Environment).where(Environment.id == uid)
+        )
+        env = result.scalar_one_or_none()
+        if not env:
+            raise HTTPException(404, detail="Environment not found.")
+
+    settings = env.settings or {}
+    products = settings.get("products", {})
+
+    from backend.engine.product_catalog import PRODUCT_CATALOG, DEFAULT_VENDORS
+    resolved = {}
+    for category in PRODUCT_CATALOG:
+        vendor = products.get(category) or DEFAULT_VENDORS.get(category, "")
+        cat_info = PRODUCT_CATALOG[category].get(vendor, {})
+        resolved[category] = {
+            "vendor": vendor,
+            "display": cat_info.get("display", vendor),
+            "index": cat_info.get("index", ""),
+            "sourcetype": cat_info.get("sourcetype", ""),
+            "is_default": category not in products,
+        }
+
+    return {
+        "environment_id": environment_id,
+        "products": resolved,
+    }
 
 
 @router.get("/{environment_id}/log-sources")

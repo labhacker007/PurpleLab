@@ -36,6 +36,11 @@ LOG_SOURCE_TYPES: list[str] = [
     "cloud_trail",
     "network_flow",
     "endpoint_telemetry",
+    # Asset & infrastructure visibility
+    "asm",              # Attack Surface Management
+    "cmdb",             # Configuration Management Database
+    "cspm",             # Cloud Security Posture Management
+    "product_registry", # Internal product/service registry
 ]
 
 # ── Detection Rule Languages ────────────────────────────────────────────────

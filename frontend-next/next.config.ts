@@ -4,11 +4,14 @@ const nextConfig: NextConfig = {
   // Required for Docker multi-stage build (copies only the minimal standalone output)
   output: 'standalone',
 
-  // Proxy API calls to FastAPI backend.
-  // In Docker Compose the NEXT_PUBLIC_API_URL build arg is set to http://backend:8000,
-  // but rewrites run server-side so they can resolve the internal service name.
+  // Proxy /api/* to the FastAPI backend. Uses INTERNAL_API_URL (runtime env,
+  // never baked into the client bundle) so Docker rewrites always resolve the
+  // internal service name "backend:8000" regardless of how the image was built.
   async rewrites() {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+    // INTERNAL_API_URL is evaluated at build time in standalone mode.
+    // Use container name (purplelab-backend) not service name (backend) to avoid
+    // Docker DNS round-robining to the Joti backend (also named 'backend' on shared network).
+    const apiBase = process.env.INTERNAL_API_URL ?? 'http://purplelab-backend:8000'
     return [
       {
         source: '/api/:path*',

@@ -57,12 +57,16 @@ interface AttackChain {
 // ─── Category config ───────────────────────────────────────────────────────────
 
 const CATEGORY_META: Record<string, { label: string; color: string; accent: string }> = {
-  siem:     { label: 'SIEM',     color: 'bg-violet-500/15 text-violet-400 border-violet-500/30', accent: 'bg-violet-500' },
-  edr:      { label: 'EDR',      color: 'bg-red-500/15 text-red-400 border-red-500/30',          accent: 'bg-red-500' },
-  cloud:    { label: 'Cloud',    color: 'bg-sky-500/15 text-sky-400 border-sky-500/30',           accent: 'bg-sky-500' },
-  identity: { label: 'Identity', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', accent: 'bg-emerald-500' },
-  email:    { label: 'Email',    color: 'bg-amber-500/15 text-amber-400 border-amber-500/30',     accent: 'bg-amber-500' },
-  itsm:     { label: 'ITSM',     color: 'bg-orange-500/15 text-orange-400 border-orange-500/30', accent: 'bg-orange-500' },
+  siem:             { label: 'SIEM',             color: 'bg-violet-500/15 text-violet-400 border-violet-500/30',  accent: 'bg-violet-500' },
+  edr:              { label: 'EDR',              color: 'bg-red-500/15 text-red-400 border-red-500/30',           accent: 'bg-red-500' },
+  cloud:            { label: 'Cloud',            color: 'bg-sky-500/15 text-sky-400 border-sky-500/30',            accent: 'bg-sky-500' },
+  identity:         { label: 'Identity',         color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', accent: 'bg-emerald-500' },
+  email:            { label: 'Email',            color: 'bg-amber-500/15 text-amber-400 border-amber-500/30',      accent: 'bg-amber-500' },
+  itsm:             { label: 'ITSM',             color: 'bg-orange-500/15 text-orange-400 border-orange-500/30',   accent: 'bg-orange-500' },
+  asm:              { label: 'ASM',              color: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',         accent: 'bg-cyan-500' },
+  cmdb:             { label: 'CMDB',             color: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',   accent: 'bg-indigo-500' },
+  cspm:             { label: 'CSPM',             color: 'bg-teal-500/15 text-teal-400 border-teal-500/30',         accent: 'bg-teal-500' },
+  product_registry: { label: 'Product Registry', color: 'bg-pink-500/15 text-pink-400 border-pink-500/30',         accent: 'bg-pink-500' },
 }
 
 function CategoryBadge({ category }: { category: string }) {

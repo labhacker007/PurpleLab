@@ -6,9 +6,11 @@ coverage analysis, and research capabilities.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,30 @@ from backend.dependencies import get_actor_service, get_db, get_mitre_service, g
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/threat-intel", tags=["threat-intel"])
+
+# ── Joti MCP connection config ────────────────────────────────────────────────
+# Set JOTI_MCP_URL and JOTI_MCP_KEY in env to enable Joti actor pull.
+# Default URL works when both containers are on the same Docker network.
+_JOTI_MCP_URL = os.environ.get("JOTI_MCP_URL", "http://host.docker.internal:8000/mcp/rpc")
+_JOTI_MCP_KEY = os.environ.get("JOTI_MCP_KEY", "")
+
+
+async def _joti_rpc(method: str, params: dict) -> dict:
+    """Issue a JSON-RPC call to the Joti MCP server. Raises HTTPException on failure."""
+    if not _JOTI_MCP_KEY:
+        raise HTTPException(503, detail="JOTI_MCP_KEY not configured. Set it in PurpleLab .env.")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            _JOTI_MCP_URL,
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+            headers={"Authorization": f"Bearer {_JOTI_MCP_KEY}"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, detail=f"Joti MCP returned HTTP {resp.status_code}")
+    data = resp.json()
+    if "error" in data:
+        raise HTTPException(502, detail=f"Joti MCP error: {data['error']}")
+    return data.get("result", {})
 
 
 # ---------------------------------------------------------------------------
@@ -581,3 +607,97 @@ async def get_mitre_coverage_matrix(
     except Exception as exc:
         logger.error("get_mitre_coverage_matrix failed: %s", exc)
         return {"matrix": [], "total_techniques": 0, "total_covered": 0, "overall_coverage_pct": 0.0, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Joti-backed threat actor endpoints (proxied via Joti MCP)
+# ---------------------------------------------------------------------------
+
+@router.get("/joti/actors")
+async def list_joti_actors(
+    search: str = Query("", description="Search by actor name or alias"),
+    limit: int = Query(50, ge=1, le=100),
+):
+    """List threat actors from Joti TIP via MCP — includes TTPs, IOC counts."""
+    result = await _joti_rpc("tools/call", {
+        "name": "list_threat_actors",
+        "arguments": {"search": search, "limit": limit},
+    })
+    content = result.get("content", [])
+    text = content[0].get("text", "{}") if content else "{}"
+    import json
+    try:
+        data = json.loads(text)
+    except Exception:
+        data = {}
+    actors = data.get("threat_actors", [])
+    return {
+        "actors": [
+            {
+                "id": str(a.get("id")),
+                "name": a.get("name", ""),
+                "description": (a.get("description") or "")[:200],
+                "aliases": a.get("aliases") or [],
+                "is_active": a.get("is_active", True),
+                "is_verified": a.get("is_verified", False),
+                "first_seen": a.get("first_seen"),
+                "last_seen": a.get("last_seen"),
+                "target_sectors": a.get("target_sectors") or [],
+                "ttp_count": a.get("ttp_count", 0),
+                "ioc_count": a.get("ioc_count", 0),
+                "article_count": a.get("article_count", 0),
+                "source": "joti",
+            }
+            for a in actors
+        ],
+        "total": data.get("total", len(actors)),
+        "source": "joti",
+    }
+
+
+@router.get("/joti/actors/{actor_id}")
+async def get_joti_actor(actor_id: str):
+    """Get full threat actor profile from Joti — resolves TTP names → MITRE IDs and IOCs."""
+    import json
+    result = await _joti_rpc("tools/call", {
+        "name": "get_threat_actor",
+        "arguments": {"actor_id": int(actor_id)},
+    })
+    content = result.get("content", [])
+    text = content[0].get("text", "{}") if content else "{}"
+    try:
+        data = json.loads(text)
+    except Exception:
+        data = {}
+    if "error" in data:
+        raise HTTPException(404, detail=data["error"])
+
+    return {
+        "id": str(data.get("id")),
+        "name": data.get("name", ""),
+        "description": data.get("description") or "",
+        "aliases": data.get("aliases") or [],
+        "origin_country": data.get("origin_country"),
+        "motivation": data.get("motivation"),
+        "actor_type": data.get("actor_type"),
+        "is_active": data.get("is_active", True),
+        "is_verified": data.get("is_verified", False),
+        "first_seen": data.get("first_seen"),
+        "last_seen": data.get("last_seen"),
+        "target_sectors": data.get("target_sectors") or [],
+        # TTPs
+        "ttps": data.get("ttps") or [],
+        "technique_ids": data.get("technique_ids") or [],
+        "ttp_details": data.get("ttp_details") or [],
+        # IOCs extracted from articles mentioning this actor
+        "iocs": data.get("iocs") or [],
+        "ioc_count": data.get("ioc_count", 0),
+        "ttp_count": data.get("ttp_count", 0),
+        "article_count": data.get("article_count", 0),
+        # Supporting data
+        "infrastructure": data.get("infrastructure") or [],
+        "tools": data.get("tools") or [],
+        "exploited_cves": data.get("exploited_cves") or [],
+        "tags": data.get("tags") or [],
+        "source": "joti",
+    }
