@@ -906,17 +906,20 @@ class SessionManager:
                     except Exception:
                         pass
 
-                    # Run event through EDR state machine and threat graph
+                    # Run event through state machines and threat graph
                     try:
                         from backend.engine.edr_state_machine import get_machine
                         from backend.engine.threat_graph import get_graph
+                        from backend.engine.product_state_machines import get_bundle
                         machine = get_machine(session_id)
+                        bundle = get_bundle(session_id)
                         graph = get_graph(session_id)
                         # Ingest into threat graph
                         graph.ingest_event(evt)
-                        # State machine: only attack events drive state transitions
+                        # State machines: only attack events drive transitions
                         if not evt.get("_benign"):
                             secondary_evts = machine.process_event(evt)
+                            secondary_evts.extend(bundle.process_event(evt))
                             for sec in secondary_evts:
                                 sec_payload = dict(sec.get("payload") or {})
                                 sec_payload["_simulated"] = True
@@ -987,12 +990,14 @@ class SessionManager:
         )
         self._sessions.pop(session_id, None)
         self.generators.pop(session_id, None)
-        # Clean up per-session EDR state machine and threat graph
+        # Clean up per-session state machines and threat graph
         try:
             from backend.engine.edr_state_machine import drop_machine
             from backend.engine.threat_graph import drop_graph
+            from backend.engine.product_state_machines import drop_bundle
             drop_machine(session_id)
             drop_graph(session_id)
+            drop_bundle(session_id)
         except Exception:
             pass
         return result

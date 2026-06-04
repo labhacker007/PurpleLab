@@ -816,6 +816,18 @@ async def update_prevention_policy(req: PolicyUpdateRequest):
     }
 
 
+@router.get("/sessions/{session_id}/product-states")
+async def get_product_states(session_id: str):
+    """Return Identity, Firewall, and SIEM state machine snapshots for a session.
+
+    Shows the current state of every entity the simulation has touched across
+    all three product tiers, plus per-technique SIEM match counts.
+    """
+    from backend.engine.product_state_machines import get_bundle
+    bundle = get_bundle(session_id)
+    return bundle.snapshot()
+
+
 @router.get("/prevention-policies/check/{technique_id}")
 async def check_technique_policy(technique_id: str, environment_id: Optional[str] = None):
     """Check what prevention action applies for a specific MITRE technique."""
