@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import (
@@ -82,6 +83,11 @@ class Environment(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
     siem_platform: Mapped[str] = mapped_column(String(50), default="splunk")
+    edr_persona: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    siem_persona: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    idp_persona: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    firewall_persona: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    network_persona: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
     log_sources: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
@@ -545,6 +551,46 @@ class Report(Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── TTP Event Template Library ────────────────────────────────────────────────
+
+class TTPEventTemplate(Base):
+    """Pre-seeded + LLM-cached TTP behavior templates for token-efficient simulation."""
+    __tablename__ = "ttp_event_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    technique_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    tactic: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    log_source: Mapped[str] = mapped_column(String(50), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, server_default="medium")
+    title_template: Mapped[str] = mapped_column(String(500), nullable=False, server_default="")
+    payload_template: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    variables: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── Simulation Scenarios ───────────────────────────────────────────────────────
+
+class SimulationScenario(Base):
+    """Saved and replayable simulation event sequences."""
+    __tablename__ = "simulation_scenarios"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    threat_actor_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    technique_ids: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    events: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    asset_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    ioc_snapshot: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    source_session_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
 
 
 # ── Security Simulation Models ─────────────────────────────────────────────────
@@ -1054,5 +1100,78 @@ class AIGuardrailConfig(Base):
     pii_masking_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     system_prompt_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
+# ── Vendor Emulation — Response Actions ──────────────────────────────────────
+
+class ResponseAction(Base):
+    """Immutable audit log of SOAR actions executed against simulated vendor APIs."""
+    __tablename__ = "response_actions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("simulation_sessions.id", ondelete="CASCADE")
+    )
+    action_type: Mapped[str] = mapped_column(String(60))   # block_ioc, isolate_host, etc.
+    actor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)   # "joti_soar" | "analyst@corp.com"
+    target: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # hostname / IP / hash
+    params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)   # {success, message, state_change}
+    persona_key: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)  # which vendor API was called
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
+# ── Vendor Emulation — Deployed Detections ───────────────────────────────────
+
+class DeployedDetection(Base):
+    """Sigma/SPL/KQL rules deployed to the simulated SIEM for validation."""
+    __tablename__ = "deployed_detections"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("simulation_sessions.id", ondelete="CASCADE"), nullable=True
+    )
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(500))
+    sigma_yaml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    query_spl: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    query_kql: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    technique_ids: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # ["T1059.001", ...]
+    status: Mapped[str] = mapped_column(String(30), default="deployed")  # deployed|disabled|testing
+    validation: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)   # {fired, matched_count, fp_count, tested_at}
+    deployed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
+
+
+# ── Tabletop Exercises ────────────────────────────────────────────────────────
+
+class TabletopExercise(Base):
+    """Multi-phase tabletop exercise with injects, decision gates, and scoring."""
+    __tablename__ = "tabletop_exercises"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    scenario_key: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)   # built-in scenario template
+    script: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)   # [{phase, inject, decisions, timer_minutes}]
+    status: Mapped[str] = mapped_column(String(30), default="draft")  # draft|running|completed|cancelled
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("simulation_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="SET NULL"), nullable=True
+    )
+    team_size: Mapped[int] = mapped_column(Integer, default=4)
+    current_phase: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    responses: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # [{phase, decision, rationale, time_seconds, score}]
+    report: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)    # after-action report
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())

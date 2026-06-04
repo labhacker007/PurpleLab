@@ -12,6 +12,14 @@ from backend.config import settings
 from backend.core.exceptions import PurpleLabError
 from backend.api.legacy import router as legacy_router
 from backend.api.v2 import v2_router
+from backend.api.vendor.crowdstrike import router as crowdstrike_router
+from backend.api.vendor.splunk import router as splunk_router
+from backend.api.vendor.defender import router as defender_router
+from backend.api.vendor.qradar import router as qradar_router
+from backend.api.vendor.xsiam import router as xsiam_router
+from backend.api.vendor.carbonblack import router as carbonblack_router
+from backend.api.v2.sim_siem import router as sim_siem_router
+from backend.api.v2.tabletop import router as tabletop_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -53,6 +61,18 @@ async def purplelab_error_handler(request: Request, exc: PurpleLabError):
 
 app.include_router(legacy_router, prefix="/api")
 app.include_router(v2_router, prefix="/api")
+
+# Vendor API emulation — each mimics a real vendor's REST API
+app.include_router(crowdstrike_router)
+app.include_router(splunk_router)
+app.include_router(defender_router)
+app.include_router(qradar_router)
+app.include_router(xsiam_router)
+app.include_router(carbonblack_router)
+
+# Simulation SIEM + Tabletop
+app.include_router(sim_siem_router)
+app.include_router(tabletop_router)
 
 
 # ── Startup / Shutdown ───────────────────────────────────────────────────────

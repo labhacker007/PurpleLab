@@ -567,6 +567,150 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["session_id"],
         },
     },
+    # ── SOAR action execution ─────────────────────────────────────────────────
+    {
+        "name": "soar_execute_action",
+        "description": (
+            "Execute a SOAR response action against a simulation session. "
+            "Actions update the state machines (EDR, Identity, Firewall), generate "
+            "confirmation events, and write an audit record. Use this to test SOAR playbooks "
+            "without touching production — isolate a host, block an IOC, disable an account, "
+            "reset a password, kill a process, or quarantine a file."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session"},
+                "action_type": {
+                    "type": "string",
+                    "enum": ["isolate_host", "release_host", "disable_account", "enable_account",
+                             "reset_password", "block_ioc", "unblock_ioc", "kill_process",
+                             "quarantine_file", "deploy_detection", "inject_alert"],
+                    "description": "The SOAR action to execute",
+                },
+                "hostname": {"type": "string", "description": "Target hostname (for host actions)"},
+                "username": {"type": "string", "description": "Target username (for account actions)"},
+                "ioc_type": {"type": "string", "enum": ["ip", "ipv4", "domain", "sha256", "md5", "url"], "description": "IOC type (for block_ioc)"},
+                "ioc_value": {"type": "string", "description": "IOC value to block (for block_ioc)"},
+                "process_name": {"type": "string", "description": "Process name to kill (for kill_process)"},
+                "sha256": {"type": "string", "description": "File hash to quarantine (for quarantine_file)"},
+                "actor": {"type": "string", "default": "joti_soar", "description": "Who is executing the action"},
+            },
+            "required": ["session_id", "action_type"],
+        },
+    },
+    # ── SIEM search ───────────────────────────────────────────────────────────
+    {
+        "name": "siem_search",
+        "description": (
+            "Run a SPL, KQL, AQL, or XQL search query against simulated events in a session. "
+            "Use this to hunt across the simulation, verify which events were generated, or "
+            "test detection queries before deploying to production SIEM. "
+            "Supports simplified query syntax — keywords, sourcetype, host, and technique filters."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session"},
+                "query": {"type": "string", "description": "The search query (SPL, KQL, AQL, or XQL)"},
+                "query_language": {"type": "string", "enum": ["spl", "kql", "aql", "xql", "eql"], "default": "spl"},
+                "earliest_time": {"type": "string", "default": "-60m", "description": "Time range start: -60m, -2h, -1d"},
+                "limit": {"type": "integer", "default": 50, "description": "Max events to return"},
+            },
+            "required": ["session_id", "query"],
+        },
+    },
+    # ── Detection deployment + validation ─────────────────────────────────────
+    {
+        "name": "siem_deploy_detection",
+        "description": (
+            "Deploy a Sigma detection rule (or SPL/KQL query) to the simulated SIEM for a session, "
+            "then optionally run validation to check if it would have fired against existing events. "
+            "Returns: fired=true/false, matched event count, false positive count, and MITRE technique coverage. "
+            "Use this to validate Sigma rules before pushing to production."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session to test against"},
+                "name": {"type": "string", "description": "Name for this detection rule"},
+                "sigma_yaml": {"type": "string", "description": "Sigma YAML rule content"},
+                "query_spl": {"type": "string", "description": "Splunk SPL query (alternative to Sigma)"},
+                "query_kql": {"type": "string", "description": "KQL query (alternative to Sigma)"},
+                "technique_ids": {"type": "array", "items": {"type": "string"}, "description": "MITRE technique IDs this detection covers"},
+                "run_validation": {"type": "boolean", "default": True, "description": "Immediately test against existing events"},
+            },
+            "required": ["session_id", "name"],
+        },
+    },
+    # ── Tabletop exercises ────────────────────────────────────────────────────
+    {
+        "name": "tabletop_create",
+        "description": (
+            "Create a tabletop exercise from a scenario template. Available scenarios: "
+            "ransomware_response (6 phases, 90min), apt_infiltration (5 phases, 75min), "
+            "insider_threat (5 phases, 60min), supply_chain_compromise (6 phases). "
+            "Returns an exercise ID and first inject narrative."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scenario_key": {"type": "string", "enum": ["ransomware_response", "apt_infiltration", "insider_threat", "supply_chain_compromise", "bec_wire_fraud"]},
+                "session_id": {"type": "string", "description": "Link to a simulation session for realistic telemetry"},
+                "team_size": {"type": "integer", "default": 4},
+                "name": {"type": "string", "description": "Custom exercise name"},
+            },
+            "required": ["scenario_key"],
+        },
+    },
+    {
+        "name": "tabletop_respond",
+        "description": (
+            "Submit a team decision for the current tabletop exercise phase. "
+            "Provide the decision_index (0-based index into the decisions list) and rationale. "
+            "Returns score for this phase and the next inject narrative (or final AAR if complete)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "exercise_id": {"type": "string", "description": "UUID of the tabletop exercise"},
+                "decision_index": {"type": "integer", "description": "0-based index of the chosen decision"},
+                "rationale": {"type": "string", "description": "Team's reasoning for this decision"},
+            },
+            "required": ["exercise_id", "decision_index"],
+        },
+    },
+    {
+        "name": "tabletop_report",
+        "description": (
+            "Get the after-action report (AAR) for a completed tabletop exercise. "
+            "Returns score, performance rating, per-phase results (correct/incorrect, recommended decision), "
+            "strengths identified, gaps, and improvement recommendations."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "exercise_id": {"type": "string", "description": "UUID of the completed tabletop exercise"},
+            },
+            "required": ["exercise_id"],
+        },
+    },
+    # ── Vendor persona management ─────────────────────────────────────────────
+    {
+        "name": "vendor_list_personas",
+        "description": (
+            "List all available vendor product personas that PurpleLab can emulate. "
+            "Returns personas grouped by category (EDR, SIEM, IdP, Firewall) with their "
+            "supported capabilities and API endpoint prefixes. Use this to discover "
+            "what product stacks are available to assign to a simulation environment."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["edr", "siem", "idp", "firewall", "all"], "default": "all"},
+            },
+        },
+    },
 ]
 
 # Build a name → definition index for fast lookup
@@ -1198,6 +1342,96 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
                 "attack_only": attack_only,
             },
             "events": events,
+        }
+
+    elif name == "soar_execute_action":
+        session_id = arguments["session_id"]
+        action_type = arguments["action_type"]
+        params = {
+            "hostname":     arguments.get("hostname", ""),
+            "username":     arguments.get("username") or arguments.get("user", ""),
+            "ioc_type":     arguments.get("ioc_type", "ip"),
+            "ioc_value":    arguments.get("ioc_value", ""),
+            "process_name": arguments.get("process_name", ""),
+            "sha256":       arguments.get("sha256", ""),
+            "actor":        arguments.get("actor", "joti_soar"),
+        }
+        from backend.engine.action_executor import execute_action
+        result = await execute_action(session_id, action_type, params)
+        return result.dict()
+
+    elif name == "siem_search":
+        from backend.api.v2.sim_siem import SearchRequest, search_events
+        req = SearchRequest(
+            session_id=arguments["session_id"],
+            query=arguments["query"],
+            query_language=arguments.get("query_language", "spl"),
+            earliest_time=arguments.get("earliest_time", "-60m"),
+            limit=int(arguments.get("limit", 50)),
+        )
+        return await search_events(req)
+
+    elif name == "siem_deploy_detection":
+        from backend.api.v2.sim_siem import DeployDetectionRequest, deploy_detection
+        req = DeployDetectionRequest(
+            session_id=arguments["session_id"],
+            name=arguments["name"],
+            sigma_yaml=arguments.get("sigma_yaml"),
+            query_spl=arguments.get("query_spl"),
+            query_kql=arguments.get("query_kql"),
+            technique_ids=arguments.get("technique_ids", []),
+            run_validation=bool(arguments.get("run_validation", True)),
+            deployed_by="joti_soar",
+        )
+        return await deploy_detection(req)
+
+    elif name == "tabletop_create":
+        from backend.api.v2.tabletop import CreateExerciseRequest, create_exercise
+        req = CreateExerciseRequest(
+            scenario_key=arguments["scenario_key"],
+            session_id=arguments.get("session_id"),
+            team_size=int(arguments.get("team_size", 4)),
+            name=arguments.get("name", ""),
+        )
+        exercise = await create_exercise(req)
+        # Auto-start and return first inject
+        from backend.api.v2.tabletop import start_exercise
+        started = await start_exercise(exercise["id"])
+        return {**exercise, "first_inject": started.get("inject")}
+
+    elif name == "tabletop_respond":
+        from backend.api.v2.tabletop import RespondRequest, respond_to_phase
+        req = RespondRequest(
+            decision_index=int(arguments["decision_index"]),
+            rationale=arguments.get("rationale", ""),
+        )
+        return await respond_to_phase(arguments["exercise_id"], req)
+
+    elif name == "tabletop_report":
+        from backend.api.v2.tabletop import get_after_action_report
+        return await get_after_action_report(arguments["exercise_id"])
+
+    elif name == "vendor_list_personas":
+        from backend.engine.product_personas import ALL_PERSONAS, PERSONAS_BY_CATEGORY
+        category = arguments.get("category", "all")
+        if category == "all":
+            personas = list(ALL_PERSONAS.values())
+        else:
+            personas = PERSONAS_BY_CATEGORY.get(category, [])
+        return {
+            "personas": [
+                {
+                    "key": p.key,
+                    "vendor": p.vendor,
+                    "product": p.product,
+                    "category": p.category,
+                    "api_prefix": p.api_prefix,
+                    "auth_scheme": p.auth_scheme,
+                    "capabilities": p.capabilities,
+                }
+                for p in personas
+            ],
+            "total": len(personas),
         }
 
     else:
