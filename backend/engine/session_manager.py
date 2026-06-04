@@ -906,6 +906,34 @@ class SessionManager:
                     except Exception:
                         pass
 
+                    # Run event through EDR state machine and threat graph
+                    try:
+                        from backend.engine.edr_state_machine import get_machine
+                        from backend.engine.threat_graph import get_graph
+                        machine = get_machine(session_id)
+                        graph = get_graph(session_id)
+                        # Ingest into threat graph
+                        graph.ingest_event(evt)
+                        # State machine: only attack events drive state transitions
+                        if not evt.get("_benign"):
+                            secondary_evts = machine.process_event(evt)
+                            for sec in secondary_evts:
+                                sec_payload = dict(sec.get("payload") or {})
+                                sec_payload["_simulated"] = True
+                                sec_payload["_type"] = "state_transition"
+                                sec_payload["_technique"] = sec.get("technique_id", "")
+                                await self.store_event(session_id, {
+                                    "product_type": sec.get("source_type", "edr"),
+                                    "severity": sec.get("severity", "medium"),
+                                    "title": sec.get("technique_id", "") or sec.get("title", ""),
+                                    "payload": sec_payload,
+                                    "target_url": "",
+                                    "status_code": 200,
+                                    "success": True,
+                                })
+                    except Exception:
+                        pass
+
                     await self.store_event(session_id, {
                         "product_type": evt.get("source_type", "generic"),
                         "severity": evt.get("severity", "info"),
@@ -959,6 +987,14 @@ class SessionManager:
         )
         self._sessions.pop(session_id, None)
         self.generators.pop(session_id, None)
+        # Clean up per-session EDR state machine and threat graph
+        try:
+            from backend.engine.edr_state_machine import drop_machine
+            from backend.engine.threat_graph import drop_graph
+            drop_machine(session_id)
+            drop_graph(session_id)
+        except Exception:
+            pass
         return result
 
 

@@ -665,3 +665,175 @@ def _entry_to_dict(e: BlockListEntry) -> dict[str, Any]:
         "expires_at": e.expires_at.isoformat() if e.expires_at else None,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
+
+
+# ── Threat graph ──────────────────────────────────────────────────────────────
+
+@router.get("/sessions/{session_id}/threat-graph")
+async def get_threat_graph(session_id: str):
+    """Return the process/lateral-movement graph for a simulation session.
+
+    The graph is built incrementally as events are generated. Nodes represent
+    processes, endpoints, external IPs, and users. Edges show parent-child
+    process creation, network connections, and lateral movement paths.
+    """
+    from backend.engine.threat_graph import get_graph
+    graph = get_graph(session_id)
+    return graph.to_dict()
+
+
+@router.get("/sessions/{session_id}/threat-graph/stats")
+async def get_threat_graph_stats(session_id: str):
+    """Return summary statistics for the threat graph of a session."""
+    from backend.engine.threat_graph import get_graph
+    graph = get_graph(session_id)
+    return {"session_id": session_id, **graph.stats()}
+
+
+# ── Endpoint state machine ────────────────────────────────────────────────────
+
+@router.get("/sessions/{session_id}/endpoint-states")
+async def get_endpoint_states(session_id: str):
+    """Return the current EDR state for every endpoint in a session.
+
+    States: online | at_risk | compromised | isolated | remediated | offline
+    State transitions are driven automatically as attack events are processed.
+    """
+    from backend.engine.edr_state_machine import get_machine
+    machine = get_machine(session_id)
+    return {
+        "session_id": session_id,
+        "endpoint_states": machine.snapshot(),
+    }
+
+
+class ManualTransitionRequest(BaseModel):
+    hostname: str = Field(..., description="Endpoint hostname to transition")
+    new_state: str = Field(..., description="Target state: online|at_risk|compromised|isolated|remediated|offline")
+    reason: str = Field("", description="Reason for manual override")
+
+
+@router.post("/sessions/{session_id}/endpoint-states/transition")
+async def manual_state_transition(session_id: str, req: ManualTransitionRequest):
+    """Manually force an endpoint state transition (e.g. isolate from SOC console)."""
+    from backend.engine.edr_state_machine import get_machine, EndpointState
+    try:
+        new_state = EndpointState(req.new_state)
+    except ValueError:
+        valid = [s.value for s in EndpointState]
+        raise HTTPException(400, detail=f"Invalid state '{req.new_state}'. Valid: {valid}")
+
+    machine = get_machine(session_id)
+    old_state = machine.get_state(req.hostname)
+    machine.set_state(req.hostname, new_state)
+
+    return {
+        "session_id": session_id,
+        "hostname": req.hostname,
+        "previous_state": old_state.value,
+        "new_state": new_state.value,
+        "reason": req.reason,
+    }
+
+
+# ── Prevention policies ───────────────────────────────────────────────────────
+
+# In-memory prevention policy store (per-environment)
+_prevention_policies: dict[str, dict[str, str]] = {}
+
+# Default policy: detect everything, block known-bad
+_DEFAULT_POLICY: dict[str, str] = {
+    "execution":            "detect",     # T1059.*
+    "persistence":          "detect",     # T1053.*, T1547.*
+    "privilege_escalation": "detect",     # T1055.*, T1134.*
+    "defense_evasion":      "detect",     # T1036.*, T1070.*
+    "credential_access":    "block",      # T1003.*  — always block credential dumping
+    "lateral_movement":     "detect",     # T1021.*
+    "collection":           "detect",     # T1005.*
+    "command_and_control":  "block",      # T1071.*  — block C2 beaconing
+    "exfiltration":         "block",      # T1041.*
+    "impact":               "block",      # T1486.*  — block ransomware
+    "initial_access":       "detect",
+    "discovery":            "alert_only",
+    "reconnaissance":       "alert_only",
+}
+
+# Map technique IDs to policy categories
+_TECHNIQUE_CATEGORY_MAP: dict[str, str] = {
+    "T1059": "execution", "T1059.001": "execution", "T1059.003": "execution",
+    "T1053": "persistence", "T1053.005": "persistence",
+    "T1547": "persistence", "T1547.001": "persistence",
+    "T1055": "privilege_escalation", "T1055.001": "privilege_escalation",
+    "T1003": "credential_access", "T1003.001": "credential_access", "T1003.003": "credential_access",
+    "T1021": "lateral_movement", "T1021.001": "lateral_movement", "T1021.002": "lateral_movement",
+    "T1071": "command_and_control", "T1071.001": "command_and_control", "T1071.004": "command_and_control",
+    "T1041": "exfiltration",
+    "T1486": "impact",
+    "T1046": "discovery",
+    "T1566": "initial_access", "T1566.001": "initial_access",
+    "T1078": "initial_access",
+}
+
+
+@router.get("/prevention-policies")
+async def get_prevention_policies(environment_id: Optional[str] = None):
+    """Return the current prevention policy for each technique category.
+
+    Policy values: block | detect | alert_only | disabled
+    """
+    key = environment_id or "default"
+    policy = _prevention_policies.get(key, dict(_DEFAULT_POLICY))
+    return {
+        "environment_id": key,
+        "policies": policy,
+        "categories": list(policy.keys()),
+    }
+
+
+class PolicyUpdateRequest(BaseModel):
+    category: str = Field(..., description="Technique category name")
+    mode: str = Field(..., description="block | detect | alert_only | disabled")
+    environment_id: Optional[str] = None
+
+
+@router.put("/prevention-policies")
+async def update_prevention_policy(req: PolicyUpdateRequest):
+    """Update the prevention mode for a technique category."""
+    valid_modes = {"block", "detect", "alert_only", "disabled"}
+    if req.mode not in valid_modes:
+        raise HTTPException(400, detail=f"mode must be one of {valid_modes}")
+
+    key = req.environment_id or "default"
+    if key not in _prevention_policies:
+        _prevention_policies[key] = dict(_DEFAULT_POLICY)
+    _prevention_policies[key][req.category] = req.mode
+
+    return {
+        "environment_id": key,
+        "category": req.category,
+        "mode": req.mode,
+        "policies": _prevention_policies[key],
+    }
+
+
+@router.get("/prevention-policies/check/{technique_id}")
+async def check_technique_policy(technique_id: str, environment_id: Optional[str] = None):
+    """Check what prevention action applies for a specific MITRE technique."""
+    key = environment_id or "default"
+    policy = _prevention_policies.get(key, dict(_DEFAULT_POLICY))
+
+    # Exact match first, then parent technique, then category
+    category = (
+        _TECHNIQUE_CATEGORY_MAP.get(technique_id)
+        or _TECHNIQUE_CATEGORY_MAP.get(technique_id.split(".")[0])
+        or "execution"
+    )
+    mode = policy.get(category, "detect")
+
+    return {
+        "technique_id": technique_id,
+        "category": category,
+        "mode": mode,
+        "would_block": mode == "block",
+        "would_alert": mode in ("block", "detect", "alert_only"),
+    }
