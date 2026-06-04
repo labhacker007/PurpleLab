@@ -449,6 +449,57 @@ async def get_log_source_json_schema(schema_id: str):
 # Event generation
 # ---------------------------------------------------------------------------
 
+class SynthesisRequest(BaseModel):
+    source_id: str = Field(..., description="Log source ID (e.g. 'crowdstrike_edr').")
+    technique_id: str = Field(..., description="MITRE ATT&CK technique (e.g. 'T1059.001').")
+    count: int = Field(10, ge=1, le=100, description="Number of events to generate.")
+    max_rounds: int = Field(2, ge=1, le=3, description="Maximum improvement iterations (1-3).")
+    quality_threshold: float = Field(0.80, ge=0.5, le=1.0, description="Stop early when score >= this.")
+    context_block: str = Field("", description="Optional SimulationContext entity block.")
+
+
+@router.post("/generate/synthesis")
+async def generate_events_synthesis(req: SynthesisRequest):
+    """Generate events using the 3-agent synthesis loop (Generator → Evaluator → Improver).
+
+    Higher quality than single-pass generation — the Evaluator scores vendor fidelity,
+    technique accuracy, detection signal strength, and realism; the Improver applies
+    the critique for up to max_rounds iterations. Results are cached after the loop.
+    """
+    from backend.log_sources.schema_registry import get_registry
+    from backend.engine.synthesis_loop import run_synthesis_loop
+
+    reg = get_registry()
+    schema = reg.get(req.source_id)
+    schema_text = reg.get_schema_text(req.source_id) if schema else f"Source: {req.source_id}"
+
+    result = await run_synthesis_loop(
+        source_id=req.source_id,
+        technique_id=req.technique_id,
+        count=req.count,
+        schema_text=schema_text,
+        context_block=req.context_block,
+        max_rounds=req.max_rounds,
+        quality_threshold=req.quality_threshold,
+    )
+
+    if not result["events"]:
+        raise HTTPException(500, detail="Synthesis loop produced no events — check LLM configuration.")
+
+    return {
+        "source_id": req.source_id,
+        "technique_id": req.technique_id,
+        "count": len(result["events"]),
+        "events": result["events"],
+        "synthesis": {
+            "rounds_run": result["rounds"],
+            "final_score": result["final_score"],
+            "timing_ms": result["timing_ms"],
+            "critiques": result["critiques"],
+        },
+    }
+
+
 @router.post("/generate")
 async def generate_events(req: GenerateRequest):
     """Generate synthetic attack events for a technique + source pair.
