@@ -131,7 +131,7 @@ async def deploy_detection(req: DeployDetectionRequest):
                 INSERT INTO deployed_detections
                     (id, session_id, environment_id, name, sigma_yaml, query_spl, query_kql, technique_ids, status, deployed_by, created_at, updated_at)
                 VALUES
-                    (:id::uuid, :session_id, :env_id, :name, :sigma_yaml, :query_spl, :query_kql, :technique_ids::jsonb, 'deployed', :deployed_by, now(), now())
+                    (:id, :session_id, :env_id, :name, :sigma_yaml, :query_spl, :query_kql, CAST(:technique_ids AS JSONB), 'deployed', :deployed_by, now(), now())
             """), {
                 "id": det_id,
                 "session_id": req.session_id,
@@ -161,8 +161,8 @@ async def deploy_detection(req: DeployDetectionRequest):
             async with async_session() as db:
                 await db.execute(text("""
                     UPDATE deployed_detections
-                    SET validation = :val::jsonb, updated_at = now()
-                    WHERE id = :id::uuid
+                    SET validation = CAST(:val AS JSONB), updated_at = now()
+                    WHERE id = :id
                 """), {
                     "id": det_id,
                     "val": _json.dumps(validation.dict() if validation else {}),
@@ -197,10 +197,10 @@ async def list_deployed_detections(
             filters = []
             params: dict[str, Any] = {"limit": limit}
             if session_id:
-                filters.append("session_id = :session_id::uuid")
+                filters.append("session_id = :session_id")
                 params["session_id"] = session_id
             if environment_id:
-                filters.append("environment_id = :env_id::uuid")
+                filters.append("environment_id = :env_id")
                 params["env_id"] = environment_id
 
             where = ("WHERE " + " AND ".join(filters)) if filters else ""
@@ -243,7 +243,7 @@ async def test_detection(
     try:
         async with async_session() as db:
             row = (await db.execute(text("""
-                SELECT sigma_yaml, query_spl, technique_ids FROM deployed_detections WHERE id = :id::uuid
+                SELECT sigma_yaml, query_spl, technique_ids FROM deployed_detections WHERE id = :id
             """), {"id": detection_id})).fetchone()
     except Exception:
         row = None
@@ -274,7 +274,7 @@ async def get_coverage(session_id: Optional[str] = Query(None)):
         async with async_session() as db:
             rows = (await db.execute(text("""
                 SELECT technique_ids, validation FROM deployed_detections
-                WHERE session_id = :sid::uuid AND status = 'deployed'
+                WHERE session_id = :sid AND status = 'deployed'
             """), {"sid": session_id})).fetchall()
     except Exception:
         return {"coverage": {}, "covered_techniques": [], "total_deployed": 0}

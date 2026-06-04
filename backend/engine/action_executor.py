@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
@@ -40,7 +40,7 @@ class ActionResult(BaseModel):
     state_after: str = ""
     event_ids: list[str] = []
     timestamp: str = ""
-    details: dict = {}
+    details: Dict[str, Any] = {}
 
     def dict(self, **kwargs) -> dict:
         return {
@@ -462,9 +462,9 @@ async def _persist_action(
                 INSERT INTO response_actions
                     (id, session_id, action_type, actor, target, params, result, persona_key, created_at)
                 VALUES
-                    (gen_random_uuid(), :session_id::uuid, :action_type, :actor, :target, :params::jsonb, :result::jsonb, :persona_key, now())
+                    (gen_random_uuid(), :session_id, :action_type, :actor, :target, CAST(:params AS JSONB), CAST(:result AS JSONB), :persona_key, now())
             """), {
-                "session_id": session_id,
+                "session_id": uuid.UUID(session_id) if session_id else None,
                 "action_type": action_type,
                 "actor": actor,
                 "target": result.target,

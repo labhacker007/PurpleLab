@@ -48,7 +48,6 @@ async def get_scenario_detail(scenario_key: str):
     s = get_scenario(scenario_key)
     if not s:
         raise HTTPException(404, detail=f"Scenario '{scenario_key}' not found")
-    # Return metadata without revealing optimal answers
     phases_meta = [
         {
             "phase": p["phase"],
@@ -77,7 +76,7 @@ async def create_exercise(req: CreateExerciseRequest):
     if not scenario:
         raise HTTPException(400, detail=f"Unknown scenario: {req.scenario_key}")
 
-    exc_id = str(uuid.uuid4())
+    exc_id = uuid.uuid4()
     name = req.name or scenario["name"]
 
     try:
@@ -88,14 +87,14 @@ async def create_exercise(req: CreateExerciseRequest):
                 INSERT INTO tabletop_exercises
                     (id, name, description, scenario_key, status, session_id, environment_id, team_size, script, current_phase, responses, created_at, updated_at)
                 VALUES
-                    (:id::uuid, :name, :desc, :scenario_key, 'draft', :session_id, :env_id, :team_size, :script::jsonb, 0, '[]'::jsonb, now(), now())
+                    (:id, :name, :desc, :scenario_key, 'draft', :session_id, :env_id, :team_size, CAST(:script AS JSONB), 0, '[]'::JSONB, now(), now())
             """), {
                 "id": exc_id,
                 "name": name,
                 "desc": scenario["description"],
                 "scenario_key": req.scenario_key,
-                "session_id": req.session_id,
-                "env_id": req.environment_id,
+                "session_id": uuid.UUID(req.session_id) if req.session_id else None,
+                "env_id": uuid.UUID(req.environment_id) if req.environment_id else None,
                 "team_size": req.team_size,
                 "script": json.dumps(scenario["phases"]),
             })
@@ -104,7 +103,7 @@ async def create_exercise(req: CreateExerciseRequest):
         pass
 
     return {
-        "id": exc_id,
+        "id": str(exc_id),
         "name": name,
         "scenario_key": req.scenario_key,
         "status": "draft",
@@ -127,8 +126,8 @@ async def start_exercise(exercise_id: str):
             await db.execute(text("""
                 UPDATE tabletop_exercises
                 SET status='running', current_phase=1, started_at=now(), updated_at=now()
-                WHERE id=:id::uuid
-            """), {"id": exercise_id})
+                WHERE id=:id
+            """), {"id": uuid.UUID(exercise_id)})
             await db.commit()
     except Exception:
         pass
@@ -176,7 +175,6 @@ async def get_exercise_status(exercise_id: str):
         "started_at": exc.get("started_at"),
     }
 
-    # Attach current inject if running
     if exc.get("status") == "running" and scenario:
         phases = scenario.get("phases", [])
         for phase in phases:
@@ -218,7 +216,6 @@ async def respond_to_phase(exercise_id: str, req: RespondRequest):
     }
     responses.append(response_record)
 
-    # Advance to next phase or complete
     scenario = get_scenario(scenario_key)
     total_phases = scenario["total_phases"] if scenario else 0
     next_phase = current_phase + 1
@@ -228,24 +225,24 @@ async def respond_to_phase(exercise_id: str, req: RespondRequest):
     final_score = compute_final_score(scenario_key, responses) if is_complete else None
 
     try:
-        import json as _json
         from backend.db.session import async_session
         from sqlalchemy import text
         async with async_session() as db:
             params: dict = {
-                "id": exercise_id,
+                "id": uuid.UUID(exercise_id),
                 "current_phase": next_phase if not is_complete else current_phase,
                 "status": new_status,
-                "responses": _json.dumps(responses),
+                "responses": json.dumps(responses),
                 "score": final_score,
             }
             score_clause = ", score=:score" if is_complete else ""
             ended_clause = ", ended_at=now()" if is_complete else ""
             await db.execute(text(f"""
                 UPDATE tabletop_exercises
-                SET current_phase=:current_phase, status=:status, responses=:responses::jsonb
+                SET current_phase=:current_phase, status=:status,
+                    responses=CAST(:responses AS JSONB)
                     {score_clause}{ended_clause}, updated_at=now()
-                WHERE id=:id::uuid
+                WHERE id=:id
             """), params)
             await db.commit()
     except Exception:
@@ -270,7 +267,6 @@ async def respond_to_phase(exercise_id: str, req: RespondRequest):
             "after_action_report": aar,
         })
     else:
-        # Return next inject
         phases = scenario.get("phases", []) if scenario else []
         for phase in phases:
             if phase["phase"] == next_phase:
@@ -352,9 +348,9 @@ async def _get_exercise(exercise_id: str) -> Optional[dict]:
         async with async_session() as db:
             row = (await db.execute(text("""
                 SELECT id, name, scenario_key, status, current_phase, score, responses,
-                       session_id, started_at, ended_at, total_phases
-                FROM tabletop_exercises WHERE id=:id::uuid
-            """), {"id": exercise_id})).fetchone()
+                       session_id, started_at, ended_at
+                FROM tabletop_exercises WHERE id=:id
+            """), {"id": uuid.UUID(exercise_id)})).fetchone()
         if not row:
             return None
         scenario = get_scenario(row[2] or "")
@@ -369,7 +365,7 @@ async def _get_exercise(exercise_id: str) -> Optional[dict]:
             "session_id": str(row[7]) if row[7] else None,
             "started_at": row[8].isoformat() if row[8] else None,
             "ended_at": row[9].isoformat() if row[9] else None,
-            "total_phases": scenario["total_phases"] if scenario else (row[10] or 0),
+            "total_phases": scenario["total_phases"] if scenario else 0,
         }
     except Exception:
         return None

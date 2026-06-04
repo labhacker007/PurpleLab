@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/vendor/defender", tags=["vendor:defender"])
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 @router.post("/oauth2/v2.0/token")
-async def get_token(body: dict = Body(default={})):
+async def get_token():
     return {
         "token_type": "Bearer",
         "access_token": f"mde-sim-token-{uuid.uuid4().hex[:20]}",
