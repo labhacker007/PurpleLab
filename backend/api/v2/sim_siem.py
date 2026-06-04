@@ -514,3 +514,34 @@ def _sigma_to_kql_keywords(sigma_yaml: str) -> str:
     if techs:
         parts.append(f'Technique == "{techs[0]}"')
     return "SecurityEvent\n| where " + " and ".join(parts) if parts else "SecurityAlert | take 100"
+
+
+# ── SOAR Execute endpoint (used by Joti vendor adapters) ─────────────────────
+
+class SOARExecuteRequest(BaseModel):
+    action_type: str
+    target: str
+    params: dict = {}
+    persona_key: str = "crowdstrike"
+
+
+@router.post("/soar/execute")
+async def soar_execute(
+    session_id: str = Query(...),
+    req: SOARExecuteRequest = ...,
+):
+    """Execute a SOAR action against a running simulation session.
+
+    Called by Joti's vendor adapters for actions that don't map cleanly
+    to a specific vendor endpoint (kill_process, quarantine_file, etc.).
+    """
+    try:
+        from backend.engine.action_executor import execute_action
+        result = await execute_action(session_id, req.action_type, {
+            "target": req.target,
+            "persona_key": req.persona_key,
+            **req.params,
+        })
+        return result.dict()
+    except Exception as exc:
+        return {"success": False, "action_type": req.action_type, "message": str(exc)}
