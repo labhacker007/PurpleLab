@@ -695,6 +695,82 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["exercise_id"],
         },
     },
+    # ── Environment + detection coverage tools (NEW) ─────────────────────────
+    {
+        "name": "env_get_topology",
+        "description": (
+            "Get the network topology graph for a simulation session's environment. "
+            "Returns nodes (hosts, services, network segments) and edges (connections). "
+            "Use this to understand which assets are in scope, their roles, and how they "
+            "are connected — essential for verifying detection placement and lateral movement paths."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session"},
+            },
+            "required": ["session_id"],
+        },
+    },
+    {
+        "name": "logs_search_timeline",
+        "description": (
+            "Search simulated log events within a session using timeline filters. "
+            "Filter by MITRE technique, severity, source type (firewall/dns/cloudtrail/edr), "
+            "or keyword. Returns events in chronological order with OCSF-normalized fields. "
+            "Use this to trace attack chains or verify that specific TTPs generated logs."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session"},
+                "technique_id": {"type": "string", "description": "MITRE technique ID (e.g. T1568.002)"},
+                "source_type": {"type": "string", "description": "Log source (firewall, dns, cloudtrail, edr, auth, sysmon, windows_eventlog)"},
+                "keyword": {"type": "string", "description": "Keyword to search in event titles and payload fields"},
+                "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+                "start_minutes_ago": {"type": "integer", "default": 120, "description": "Search from N minutes ago"},
+                "attack_only": {"type": "boolean", "default": False, "description": "Return only attack events (exclude benign baseline)"},
+                "limit": {"type": "integer", "default": 50},
+            },
+            "required": ["session_id"],
+        },
+    },
+    {
+        "name": "detection_test_rule",
+        "description": (
+            "Test a Sigma YAML, SPL, or KQL detection rule against events already in a simulation session. "
+            "Returns whether the rule fired, how many events matched, estimated false positive rate, "
+            "and which MITRE techniques were covered. Use this to validate detection logic before "
+            "deploying to a production SIEM."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session to test against"},
+                "rule_name": {"type": "string", "description": "Name for this rule (for reference)"},
+                "sigma_yaml": {"type": "string", "description": "Sigma YAML rule content"},
+                "query_spl": {"type": "string", "description": "Splunk SPL query (alternative to Sigma)"},
+                "query_kql": {"type": "string", "description": "KQL query (alternative to Sigma)"},
+                "technique_ids": {"type": "array", "items": {"type": "string"}, "description": "MITRE IDs this rule targets"},
+            },
+            "required": ["session_id", "rule_name"],
+        },
+    },
+    {
+        "name": "detection_get_coverage",
+        "description": (
+            "Get the MITRE ATT&CK detection coverage heatmap for rules deployed in a session. "
+            "Returns per-technique coverage status (detected/not detected), rule count per technique, "
+            "total deployed rules, and a list of uncovered techniques. "
+            "Use this to identify detection gaps after a purple team exercise."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "UUID of the simulation session (optional — returns org-wide if omitted)"},
+            },
+        },
+    },
     # ── Vendor persona management ─────────────────────────────────────────────
     {
         "name": "vendor_list_personas",
@@ -1410,6 +1486,85 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     elif name == "tabletop_report":
         from backend.api.v2.tabletop import get_after_action_report
         return await get_after_action_report(arguments["exercise_id"])
+
+    elif name == "env_get_topology":
+        session_id = arguments["session_id"]
+        async with httpx.AsyncClient() as c:
+            r = await c.get(f"{base}/sessions/{session_id}/topology", timeout=15)
+            if r.status_code == 200:
+                return r.json()
+            # Fallback: return the session's config-level topology summary
+            sr = await c.get(f"{base}/sessions/{session_id}", timeout=15)
+            if sr.status_code != 200:
+                return {"error": f"Session {session_id} not found", "nodes": [], "edges": []}
+            session = sr.json()
+            cfg = session.get("config") or {}
+            return {
+                "session_id": session_id,
+                "environment_id": cfg.get("environment_id"),
+                "simulation_context": session.get("simulation_context"),
+                "products": cfg.get("products", []),
+                "nodes": [],
+                "edges": [],
+                "note": "Full topology graph unavailable; session config returned",
+            }
+
+    elif name == "logs_search_timeline":
+        # Delegate to simulation_timeline_search handler with compatible args
+        return await _call_tool("simulation_timeline_search", {
+            "session_id": arguments["session_id"],
+            "technique_id": arguments.get("technique_id"),
+            "severity": arguments.get("severity"),
+            "source_type": arguments.get("source_type"),
+            "keyword": arguments.get("keyword"),
+            "start_minutes_ago": arguments.get("start_minutes_ago", 120),
+            "attack_only": arguments.get("attack_only", False),
+            "limit": arguments.get("limit", 50),
+        })
+
+    elif name == "detection_test_rule":
+        from backend.api.v2.sim_siem import DeployDetectionRequest, deploy_detection
+        req = DeployDetectionRequest(
+            session_id=arguments["session_id"],
+            name=arguments["rule_name"],
+            sigma_yaml=arguments.get("sigma_yaml"),
+            query_spl=arguments.get("query_spl"),
+            query_kql=arguments.get("query_kql"),
+            technique_ids=arguments.get("technique_ids", []),
+            run_validation=True,
+            deployed_by="mcp_test",
+        )
+        result = await deploy_detection(req)
+        # Return test-oriented view (don't persist permanently — this is a test)
+        return {
+            "session_id": arguments["session_id"],
+            "rule_name": arguments["rule_name"],
+            "fired": result.get("validation", {}).get("fired", False),
+            "match_count": result.get("validation", {}).get("match_count", 0),
+            "fp_count": result.get("validation", {}).get("fp_count", 0),
+            "fp_rate": result.get("validation", {}).get("fp_rate", 0.0),
+            "techniques_covered": result.get("technique_ids", []),
+            "deployed_id": result.get("detection_id"),
+            "detail": result,
+        }
+
+    elif name == "detection_get_coverage":
+        session_id = arguments.get("session_id")
+        params = {}
+        if session_id:
+            params["session_id"] = session_id
+        async with httpx.AsyncClient() as c:
+            r = await c.get(f"{base}/sim-siem/coverage", params=params, timeout=15)
+            data = r.json()
+        # Enrich with uncovered-techniques list
+        coverage = data.get("coverage", {})
+        uncovered = [t for t, v in coverage.items() if not v.get("detected")]
+        data["uncovered_techniques"] = uncovered
+        data["coverage_pct"] = (
+            round(100 * len(data.get("detected_techniques", [])) / max(len(coverage), 1), 1)
+            if coverage else 0.0
+        )
+        return data
 
     elif name == "vendor_list_personas":
         from backend.engine.product_personas import ALL_PERSONAS, PERSONAS_BY_CATEGORY
