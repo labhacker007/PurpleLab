@@ -585,6 +585,52 @@ async def get_session_events(
     }
 
 
+@router.get("/{session_id}/topology")
+async def get_session_topology(session_id: str):
+    """Return the topology graph for this session's environment.
+
+    Shows which product tiers are installed, which log sources they produce,
+    and which MITRE techniques each tier can observe.  Useful for the frontend
+    to render a product connectivity diagram and explain coverage gaps.
+    """
+    s = await _get_or_404(session_id)
+    products: dict = {}
+    technique_ids: list = []
+    try:
+        cfg = s.config or {}
+        products = cfg.get("products") or {}
+        technique_ids = cfg.get("technique_ids") or cfg.get("threat_actor_ttps") or []
+        if not products:
+            from backend.db.models import Environment
+            env_id = cfg.get("environment_id")
+            if env_id:
+                async with async_session() as db_s:
+                    env = await db_s.get(Environment, int(env_id))
+                    if env and env.settings:
+                        products = env.settings.get("products") or {}
+    except Exception:
+        pass
+
+    from backend.engine.topology_graph import build_topology, TECHNIQUE_OBSERVERS
+    graph = build_topology(products)
+    graph_dict = graph.to_dict()
+
+    # Add per-technique observer breakdown
+    tech_coverage = {}
+    for tid in technique_ids:
+        nodes = graph.resolve_observers(tid)
+        tech_coverage[tid] = [n.log_source for n in nodes]
+
+    return {
+        "session_id": session_id,
+        "topology": graph_dict,
+        "technique_coverage": tech_coverage,
+        "coverage_gaps": [
+            tid for tid, srcs in tech_coverage.items() if not srcs
+        ],
+    }
+
+
 @router.get("/{session_id}/context")
 async def get_session_context(session_id: str):
     """Return the SimulationContext entities for this session.

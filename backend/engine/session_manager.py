@@ -644,6 +644,7 @@ class SessionManager:
             )
             from backend.engine.benign_library import generate_benign_events
             from backend.engine.simulation_context import ContextBuilder, save_context
+            from backend.engine.topology_graph import build_topology, topology_aware_event_filter
 
             total_target = min(int(config.get("event_count", 50)), 500)
             emitted = 0
@@ -802,6 +803,28 @@ class SessionManager:
                             break
                         attack_events.extend(batch_events)
                         emitted += len(batch_events)
+
+                # ── Step 3b: Topology filter — discard events from products that
+                #            have no line-of-sight to the techniques simulated ───
+                products_cfg = asset_pool.get("products") or {}
+                if products_cfg and technique_ids:
+                    topology = build_topology(products_cfg)
+                    filtered_attack: list[dict[str, Any]] = []
+                    for ev in attack_events:
+                        tid = ev.get("technique_id") or ev.get("_technique", "")
+                        if tid:
+                            valid_srcs = set(topology.resolve_log_sources(tid))
+                            src = ev.get("source_type", ev.get("log_source", ""))
+                            if not valid_srcs or not src or src in valid_srcs:
+                                filtered_attack.append(ev)
+                        else:
+                            filtered_attack.append(ev)
+                    if filtered_attack:
+                        discarded = len(attack_events) - len(filtered_attack)
+                        if discarded:
+                            log.info("session %s: topology filter discarded %d events (wrong tier)",
+                                     session_id, discarded)
+                        attack_events = filtered_attack
 
                 # ── Step 4: Generate benign baseline events ──────────────────
                 benign_count = int(total_target * BENIGN_RATIO) if technique_ids else 0
