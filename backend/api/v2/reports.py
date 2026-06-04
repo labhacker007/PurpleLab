@@ -1,10 +1,11 @@
-"""Reports API — generate and serve coverage, use case, pipeline, and full reports.
+"""Reports API — generate and serve coverage, use case, pipeline, full, and session reports.
 
-GET    /reports                 — list all saved reports
-POST   /reports/generate        — trigger background report generation
-GET    /reports/{id}            — get report by id with full data
-GET    /reports/{id}/download   — stream the report file
-DELETE /reports/{id}            — delete a report
+GET    /reports                          — list all saved reports
+POST   /reports/generate                 — trigger background report generation
+GET    /reports/{id}                     — get report by id with full data
+GET    /reports/{id}/download            — stream the report file
+DELETE /reports/{id}                     — delete a report
+GET    /reports/session/{sid}/export     — inline HTML export for a simulation session
 """
 from __future__ import annotations
 
@@ -13,9 +14,10 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from typing import Optional
 
 from backend.db.session import async_session
 from backend.db.models import Report
@@ -31,9 +33,10 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 class GenerateReportRequest(BaseModel):
     name: str = ""
-    type: str  # coverage | use_cases | pipeline | full
+    type: str  # coverage | use_cases | pipeline | full | session
     format: str = "json"  # json | html
     date_range_days: int = 30
+    session_id: Optional[str] = None  # required for type=session
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +81,10 @@ async def generate_report(
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
     """Trigger background report generation. Returns report_id immediately."""
-    if req.type not in ("coverage", "use_cases", "pipeline", "full"):
+    if req.type not in ("coverage", "use_cases", "pipeline", "full", "session"):
         raise HTTPException(status_code=400, detail=f"Unknown report type: {req.type}")
+    if req.type == "session" and not req.session_id:
+        raise HTTPException(status_code=400, detail="session_id is required for type=session")
     if req.format not in ("json", "html"):
         raise HTTPException(status_code=400, detail=f"Unknown format: {req.format}")
 
@@ -105,6 +110,7 @@ async def generate_report(
         req.type,
         req.format,
         req.date_range_days,
+        req.session_id,
     )
 
     return {"report_id": str(report_id), "status": "generating"}
@@ -168,7 +174,10 @@ async def download_report(report_id: str) -> Any:
         raise HTTPException(status_code=400, detail=f"Report is not ready (status: {report.status})")
 
     if report.format == "html":
-        html = _render_html_report(report)
+        if report.type == "session":
+            html = _render_html_session_report(report.data or {})
+        else:
+            html = _render_html_report(report)
         return HTMLResponse(
             content=html,
             headers={
@@ -189,6 +198,40 @@ async def download_report(report_id: str) -> Any:
 # ---------------------------------------------------------------------------
 # DELETE /reports/{id}
 # ---------------------------------------------------------------------------
+
+@router.get("/session/{session_id}/export")
+async def export_session_report(
+    session_id: str,
+    fmt: str = Query("html", description="html or json"),
+) -> Any:
+    """Inline (synchronous) report generation for a single simulation session.
+
+    Returns immediately with a downloadable HTML or JSON report — no background queue.
+    """
+    if fmt not in ("html", "json"):
+        raise HTTPException(status_code=400, detail="fmt must be 'html' or 'json'")
+
+    try:
+        data = await _compute_session_report(session_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
+
+    session_name = data.get("session_name", session_id[:8])
+    safe_name = _safe_filename(f"PurpleLab-Session-{session_name}")
+
+    if fmt == "html":
+        html = _render_html_session_report(data)
+        return HTMLResponse(
+            content=html,
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.html"'},
+        )
+    else:
+        import json
+        return JSONResponse(
+            content=data,
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.json"'},
+        )
+
 
 @router.delete("/{report_id}")
 async def delete_report(report_id: str) -> dict[str, str]:
@@ -220,13 +263,14 @@ async def _generate_report_background(
     report_type: str,
     report_format: str,
     date_range_days: int,
+    session_id: Optional[str] = None,
 ) -> None:
     """Compute report data and persist to DB."""
     from sqlalchemy import select
 
     rid = uuid.UUID(report_id)
     try:
-        data = await _compute_report_data(report_type, date_range_days)
+        data = await _compute_report_data(report_type, date_range_days, session_id)
         status = "ready"
     except Exception as exc:
         logger.error("Report generation failed for %s: %s", report_id, exc)
@@ -245,7 +289,7 @@ async def _generate_report_background(
         logger.error("Failed to persist report result for %s: %s", report_id, exc)
 
 
-async def _compute_report_data(report_type: str, date_range_days: int) -> dict[str, Any]:
+async def _compute_report_data(report_type: str, date_range_days: int, session_id: Optional[str] = None) -> dict[str, Any]:
     """Compute the appropriate report data depending on type."""
     since = datetime.now(timezone.utc) - timedelta(days=date_range_days)
 
@@ -258,6 +302,10 @@ async def _compute_report_data(report_type: str, date_range_days: int) -> dict[s
     if report_type == "full":
         coverage, use_cases, pipeline = await _gather_all(since)
         return {"coverage": coverage, "use_cases": use_cases, "pipeline": pipeline}
+    if report_type == "session":
+        if not session_id:
+            raise ValueError("session_id required for session report")
+        return await _compute_session_report(session_id)
     raise ValueError(f"Unknown report type: {report_type}")
 
 
@@ -561,6 +609,259 @@ async def _compute_pipeline(since: datetime) -> dict[str, Any]:
         "total_des_improvements": len(des_improvements),
         "run_history": run_history,
     }
+
+
+# ---------------------------------------------------------------------------
+# Session report
+# ---------------------------------------------------------------------------
+
+async def _compute_session_report(session_id: str) -> dict[str, Any]:
+    """Generate a full per-simulation-session report."""
+    from sqlalchemy import select
+    from backend.db.models import SimulationSession, GeneratedEvent, ResponseAction
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise ValueError(f"Invalid session_id: {session_id}")
+
+    async with async_session() as db:
+        # Session metadata
+        sess_result = await db.execute(
+            select(SimulationSession).where(SimulationSession.id == session_uuid)
+        )
+        session = sess_result.scalar_one_or_none()
+
+        # Events (all, ordered by creation time)
+        events_result = await db.execute(
+            select(GeneratedEvent)
+            .where(GeneratedEvent.session_id == session_uuid)
+            .order_by(GeneratedEvent.created_at.asc())
+        )
+        events = events_result.scalars().all()
+
+        # SOAR actions
+        actions_result = await db.execute(
+            select(ResponseAction)
+            .where(ResponseAction.session_id == session_uuid)
+            .order_by(ResponseAction.created_at.asc())
+        )
+        actions = actions_result.scalars().all()
+
+    # Aggregate events — technique_id lives inside payload
+    by_severity: dict[str, int] = {}
+    by_technique: dict[str, int] = {}
+    by_source: dict[str, int] = {}
+    for ev in events:
+        sev = ev.severity or "unknown"
+        by_severity[sev] = by_severity.get(sev, 0) + 1
+        payload = ev.payload or {}
+        t = payload.get("technique_id") or payload.get("TechniqueId") or "unknown"
+        by_technique[t] = by_technique.get(t, 0) + 1
+        s = ev.product_type or "unknown"
+        by_source[s] = by_source.get(s, 0) + 1
+
+    # Aggregate actions
+    by_action_type: dict[str, int] = {}
+    for act in actions:
+        by_action_type[act.action_type or "unknown"] = by_action_type.get(act.action_type or "unknown", 0) + 1
+
+    # Detected techniques — from result.state_change or result.detected in ResponseAction
+    triggered_techniques = set(by_technique.keys()) - {"unknown"}
+    detected_techniques: set[str] = set()
+    for ev in events:
+        payload = ev.payload or {}
+        if payload.get("detected") or payload.get("rule_fired"):
+            t = payload.get("technique_id") or payload.get("TechniqueId", "")
+            if t:
+                detected_techniques.add(t)
+
+    detection_rate = round(len(detected_techniques) / max(len(triggered_techniques), 1) * 100, 1)
+
+    # Top events timeline (last 50)
+    event_timeline = [
+        {
+            "id": str(ev.id),
+            "timestamp": ev.created_at.isoformat() if ev.created_at else None,
+            "title": ev.title,
+            "severity": ev.severity,
+            "technique_id": (ev.payload or {}).get("technique_id") or (ev.payload or {}).get("TechniqueId"),
+            "source_type": ev.product_type,
+            "detected": bool((ev.payload or {}).get("detected") or (ev.payload or {}).get("rule_fired")),
+        }
+        for ev in events[-50:]
+    ]
+
+    action_log = [
+        {
+            "id": str(act.id),
+            "timestamp": act.created_at.isoformat() if act.created_at else None,
+            "action_type": act.action_type,
+            "target": act.target,
+            "actor": act.actor,
+            "success": bool((act.result or {}).get("success", True)),
+        }
+        for act in actions
+    ]
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "session_id": session_id,
+        "session_name": session.name if session else session_id[:8],
+        "session_status": session.status if session else "unknown",
+        "session_started_at": session.created_at.isoformat() if session and session.created_at else None,
+        "session_ended_at": session.stopped_at.isoformat() if session and session.stopped_at else None,
+        "total_events": len(events),
+        "total_actions": len(actions),
+        "by_severity": dict(sorted(by_severity.items(), key=lambda x: x[1], reverse=True)),
+        "by_source": dict(sorted(by_source.items(), key=lambda x: x[1], reverse=True)),
+        "top_techniques": dict(sorted(by_technique.items(), key=lambda x: x[1], reverse=True)[:20]),
+        "by_action_type": by_action_type,
+        "triggered_technique_count": len(triggered_techniques),
+        "detected_technique_count": len(detected_techniques),
+        "detection_rate_pct": detection_rate,
+        "triggered_techniques": sorted(triggered_techniques),
+        "detected_techniques": sorted(detected_techniques),
+        "undetected_techniques": sorted(triggered_techniques - detected_techniques),
+        "event_timeline": event_timeline,
+        "action_log": action_log,
+    }
+
+
+def _render_html_session_report(data: dict) -> str:
+    """Generate clean printable HTML for a per-session simulation report."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    session_name = data.get("session_name", "Unknown Session")
+    session_id = data.get("session_id", "")
+    status = data.get("session_status", "—")
+    started = data.get("session_started_at") or "—"
+    ended = data.get("session_ended_at") or "—"
+
+    def _badge(val: Any, color: str = "#6366f1") -> str:
+        return f'<span style="background:{color};color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">{val}</span>'
+
+    status_color = {"running": "#22c55e", "completed": "#6366f1", "failed": "#ef4444"}.get(status, "#64748b")
+
+    # Severity rows
+    sev_colors = {"critical": "#ef4444", "high": "#f97316", "medium": "#eab308", "low": "#3b82f6", "info": "#64748b"}
+    sev_rows = "".join(
+        f'<tr><td>{_badge(sev, sev_colors.get(sev, "#64748b"))}</td><td>{cnt}</td></tr>'
+        for sev, cnt in (data.get("by_severity") or {}).items()
+    )
+
+    # Top techniques rows
+    tech_rows = "".join(
+        f'<tr><td style="font-family:monospace">{tech}</td><td>{cnt}</td>'
+        f'<td>{"✓ detected" if tech in (data.get("detected_techniques") or []) else "✗ missed"}</td></tr>'
+        for tech, cnt in (data.get("top_techniques") or {}).items()
+    )
+
+    # SOAR action rows
+    action_rows = "".join(
+        f'<tr><td style="font-family:monospace;font-size:11px">{a["timestamp"] or "—"}</td>'
+        f'<td>{a["action_type"]}</td><td>{a["target"] or "—"}</td>'
+        f'<td>{a["actor"] or "—"}</td>'
+        f'<td>{"✓" if a["success"] else "✗"}</td></tr>'
+        for a in (data.get("action_log") or [])[-30:]
+    )
+
+    # Event timeline rows
+    ev_colors = {"critical": "#fee2e2", "high": "#ffedd5", "medium": "#fef9c3", "low": "#dbeafe"}
+    event_rows = "".join(
+        f'<tr style="background:{ev_colors.get(ev["severity"] or "", "")}">'
+        f'<td style="font-family:monospace;font-size:11px">{ev["timestamp"] or "—"}</td>'
+        f'<td>{_badge(ev["severity"] or "?", sev_colors.get(ev["severity"] or "", "#64748b"))}</td>'
+        f'<td style="font-family:monospace;font-size:11px">{ev["technique_id"] or "—"}</td>'
+        f'<td>{ev["title"] or "—"}</td>'
+        f'<td>{ev["source_type"] or "—"}</td>'
+        f'<td>{"✓" if ev["detected"] else "✗"}</td></tr>'
+        for ev in (data.get("event_timeline") or [])
+    )
+
+    undetected = data.get("undetected_techniques") or []
+    undetected_str = ", ".join(f'<code>{t}</code>' for t in undetected) or "None"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PurpleLab — Simulation Report — {session_name}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1e293b; background: #fff; padding: 40px; max-width: 1200px; margin: 0 auto; }}
+  header {{ border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-end; }}
+  header h1 {{ font-size: 20px; font-weight: 700; color: #0f172a; }}
+  header .meta {{ font-size: 11px; color: #64748b; text-align: right; }}
+  .kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }}
+  .kpi {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; }}
+  .kpi .val {{ font-size: 26px; font-weight: 700; color: #0f172a; }}
+  .kpi .lbl {{ font-size: 11px; color: #64748b; margin-top: 2px; }}
+  section {{ margin-bottom: 32px; }}
+  h2 {{ font-size: 15px; font-weight: 700; color: #0f172a; border-left: 3px solid #6366f1; padding-left: 10px; margin-bottom: 14px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 14px; }}
+  th {{ background: #f1f5f9; text-align: left; padding: 7px 10px; font-weight: 600; color: #475569; border: 1px solid #e2e8f0; }}
+  td {{ padding: 6px 10px; border: 1px solid #e2e8f0; vertical-align: top; }}
+  tr:nth-child(even) td {{ background: #f8fafc; }}
+  code {{ background: #f1f5f9; border-radius: 3px; padding: 1px 4px; font-family: monospace; font-size: 11px; }}
+  .undetected {{ background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 14px; font-size: 12px; color: #991b1b; }}
+  @media print {{ body {{ padding: 20px; font-size: 11px; }} .kpi-grid {{ grid-template-columns: repeat(4,1fr); }} }}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>PurpleLab — Simulation Report</h1>
+    <div style="font-size:13px;color:#475569;margin-top:4px">{session_name} &nbsp;·&nbsp; {_badge(status, status_color)}</div>
+  </div>
+  <div class="meta">Generated {now_str}<br>Session ID: {session_id[:8]}…</div>
+</header>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="val">{data.get("total_events",0)}</div><div class="lbl">Events Generated</div></div>
+  <div class="kpi"><div class="val">{data.get("triggered_technique_count",0)}</div><div class="lbl">Techniques Triggered</div></div>
+  <div class="kpi"><div class="val" style="color:#22c55e">{data.get("detected_technique_count",0)}</div><div class="lbl">Techniques Detected</div></div>
+  <div class="kpi"><div class="val" style="color:{"#22c55e" if float(data.get("detection_rate_pct",0))>=70 else "#ef4444"}">{data.get("detection_rate_pct",0)}%</div><div class="lbl">Detection Rate</div></div>
+</div>
+
+<section>
+  <h2>Session Summary</h2>
+  <table class="kv" style="max-width:500px">
+    <tr><th>Status</th><td>{_badge(status, status_color)}</td></tr>
+    <tr><th>Started At</th><td>{started}</td></tr>
+    <tr><th>Ended At</th><td>{ended}</td></tr>
+    <tr><th>Total Events</th><td>{data.get("total_events",0)}</td></tr>
+    <tr><th>SOAR Actions</th><td>{data.get("total_actions",0)}</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Events by Severity</h2>
+  <table style="max-width:300px"><thead><tr><th>Severity</th><th>Count</th></tr></thead>
+  <tbody>{sev_rows}</tbody></table>
+</section>
+
+<section>
+  <h2>Top MITRE ATT&amp;CK Techniques</h2>
+  <table><thead><tr><th>Technique</th><th>Events</th><th>Detection</th></tr></thead>
+  <tbody>{tech_rows or "<tr><td colspan=3>No technique data</td></tr>"}</tbody></table>
+</section>
+
+{"" if not undetected else f'<section><h2>Undetected Techniques ({len(undetected)})</h2><div class="undetected">{undetected_str}</div></section>'}
+
+<section>
+  <h2>SOAR Actions Executed</h2>
+  {"<p style='color:#64748b;font-size:13px'>No SOAR actions recorded for this session.</p>" if not action_rows else
+   "<table><thead><tr><th>Timestamp</th><th>Action</th><th>Target</th><th>Actor</th><th>Result</th></tr></thead><tbody>" + action_rows + "</tbody></table>"}
+</section>
+
+<section>
+  <h2>Event Timeline (last {len(data.get("event_timeline",[]))}) </h2>
+  {"<p style='color:#64748b;font-size:13px'>No events recorded.</p>" if not event_rows else
+   "<table><thead><tr><th>Timestamp</th><th>Sev</th><th>Technique</th><th>Title</th><th>Source</th><th>Det.</th></tr></thead><tbody>" + event_rows + "</tbody></table>"}
+</section>
+</body>
+</html>"""
 
 
 # ---------------------------------------------------------------------------
