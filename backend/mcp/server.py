@@ -1238,7 +1238,9 @@ async def handle_request(body: dict[str, Any], api_key: Optional[str]) -> dict[s
 
         try:
             result = await _call_tool(tool_name, arguments)
-            return _ok({"content": [{"type": "text", "text": str(result) if not isinstance(result, (dict, list)) else None, "data": result}]})
+            import json as _json
+            text_body = _json.dumps(result, default=str) if isinstance(result, (dict, list)) else str(result)
+            return _ok({"content": [{"type": "text", "text": text_body}]})
         except Exception as exc:
             logger.exception("Tool %s failed: %s", tool_name, exc)
             return _err(-32603, f"Tool execution error: {exc}")
