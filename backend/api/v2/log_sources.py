@@ -138,6 +138,30 @@ _GENERATOR_META: dict[str, dict[str, Any]] = {
         "description": "AWS GuardDuty threat detection findings via CloudWatch Events.",
         "supported_fields": ["id", "type", "severity", "accountId", "region", "service.action", "resource", "description"],
     },
+    "asm": {
+        "name": "Attack Surface Management",
+        "category": "asm",
+        "description": "External attack surface findings: exposed services, expired certs, subdomain takeovers, leaked credentials.",
+        "supported_fields": ["asset_id", "asset_type", "asset_value", "severity", "finding_type", "port", "service", "first_seen", "last_seen", "tags", "remediation"],
+    },
+    "cmdb": {
+        "name": "CMDB",
+        "category": "cmdb",
+        "description": "Configuration item lifecycle and drift events: asset changes, decommissions, configuration drift.",
+        "supported_fields": ["ci_id", "ci_class", "ci_name", "owner", "environment", "status", "ip_addresses", "os_version", "patch_level", "change_type", "changed_at", "changed_by"],
+    },
+    "cspm": {
+        "name": "CSPM",
+        "category": "cspm",
+        "description": "Cloud misconfiguration and compliance findings: public buckets, over-privileged IAM, encryption gaps.",
+        "supported_fields": ["finding_id", "cloud_provider", "account_id", "region", "resource_id", "resource_type", "rule_id", "rule_title", "severity", "status", "compliance_frameworks"],
+    },
+    "product_registry": {
+        "name": "Product Registry",
+        "category": "product_registry",
+        "description": "Internal product/service catalog events: registration, updates, deprecation, vulnerability detection.",
+        "supported_fields": ["service_id", "service_name", "team", "tier", "data_classification", "pii_handler", "external_facing", "dependencies", "event_type", "changed_at"],
+    },
 }
 
 
@@ -219,6 +243,83 @@ async def get_source_techniques(source_id: str):
             for tid, etypes in schema.mitre_mappings.items()
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# OCSF normalization endpoints
+# ---------------------------------------------------------------------------
+
+# Maps schema registry source IDs to OCSF vendor keys
+_SOURCE_TO_OCSF_VENDOR: dict[str, str] = {
+    "windows_security":     "microsoft",
+    "windows_sysmon":       "microsoft",
+    "crowdstrike_edr":      "crowdstrike",
+    "okta_identity":        "okta",
+    "palo_alto_ngfw":       "palo_alto",
+    "aws_cloudtrail":       "aws",
+    "aws_guardduty":        "aws",
+}
+
+
+@router.get("/sources/{source_id}/ocsf-mapping")
+async def get_source_ocsf_mapping(source_id: str):
+    """Return the vendor-field → OCSF canonical-path mapping for a log source.
+
+    Uses the OCSF normalizer's static translation tables to show exactly which
+    raw vendor fields are mapped and what OCSF path they resolve to.
+    """
+    from backend.engine.ocsf_normalizer import get_ocsf_field_map
+
+    # Derive vendor: try the explicit table first, then the source_id prefix
+    vendor = _SOURCE_TO_OCSF_VENDOR.get(source_id)
+    if not vendor:
+        vendor = source_id.split("_")[0]
+
+    mapping = get_ocsf_field_map(vendor)
+    if not mapping:
+        # Verify at least that the source exists in the schema registry
+        from backend.log_sources.schema_registry import get_registry
+        if not get_registry().get(source_id):
+            raise HTTPException(404, detail=f"Source '{source_id}' not found.")
+        return {
+            "source_id": source_id,
+            "vendor": vendor,
+            "ocsf_mapping": {},
+            "note": "No OCSF field mapping defined for this vendor yet.",
+        }
+
+    return {"source_id": source_id, "vendor": vendor, "ocsf_mapping": mapping}
+
+
+@router.get("/ocsf/vendors")
+async def list_ocsf_vendors():
+    """List all vendors that have OCSF field-translation tables defined."""
+    from backend.engine.ocsf_normalizer import list_supported_vendors
+    return {"vendors": list_supported_vendors()}
+
+
+class OCSFNormalizeRequest(BaseModel):
+    payload: dict[str, Any] = Field(..., description="Raw vendor event payload to normalize.")
+    vendor: str = Field(..., description="Vendor key: crowdstrike | okta | palo_alto | aws | microsoft")
+    product: str = Field("default", description="Product hint, e.g. 'edr', 'cloudtrail'.")
+    source_type: str = Field("", description="Vendor event-type hint, e.g. 'ProcessRollup2'.")
+
+
+@router.post("/ocsf/normalize")
+async def normalize_event(req: OCSFNormalizeRequest):
+    """Normalize a raw vendor payload to OCSF canonical format.
+
+    Returns the OCSF event dict with class_uid, class_name, and all mapped
+    canonical fields. Unmapped vendor fields are preserved under 'unmapped'.
+    """
+    from backend.engine.ocsf_normalizer import normalize_to_ocsf
+    result = normalize_to_ocsf(
+        req.payload,
+        vendor=req.vendor,
+        product=req.product,
+        source_type=req.source_type,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

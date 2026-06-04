@@ -27,6 +27,32 @@ from backend.engine.generators.base import BaseGenerator
 log = logging.getLogger(__name__)
 
 
+# ── Source → vendor map for OCSF normalization ────────────────────────────────
+
+_SOURCE_VENDOR_MAP: dict[str, tuple[str, str]] = {
+    "windows_eventlog":  ("microsoft", "windows_security"),
+    "sysmon":            ("microsoft", "sysmon"),
+    "edr":               ("crowdstrike", "edr"),
+    "crowdstrike_edr":   ("crowdstrike", "edr"),
+    "crowdstrike":       ("crowdstrike", "edr"),
+    "auth":              ("okta", "identity"),
+    "okta":              ("okta", "identity"),
+    "okta_identity":     ("okta", "identity"),
+    "firewall":          ("palo_alto", "ngfw"),
+    "palo_alto":         ("palo_alto", "ngfw"),
+    "dns":               ("crowdstrike", "dns"),
+    "cloudtrail":        ("aws", "cloudtrail"),
+    "cloud":             ("aws", "cloudtrail"),
+    "aws_cloudtrail":    ("aws", "cloudtrail"),
+}
+
+
+def _infer_vendor_product(source_type: str) -> tuple[str, str]:
+    """Map a source_type to (vendor, product) for OCSF normalization."""
+    key = source_type.lower().replace(" ", "_").replace("-", "_")
+    return _SOURCE_VENDOR_MAP.get(key, ("", ""))
+
+
 # ── LLM-based event generation ────────────────────────────────────────────────
 
 _LOG_SYSTEM_PROMPT = """You are a cybersecurity simulation engine that generates realistic SIEM log events.
@@ -864,6 +890,21 @@ class SessionManager:
                         payload["_type"] = "baseline"
                     else:
                         payload["_type"] = "attack"
+
+                    # Attach OCSF-normalized representation (best-effort, never blocks)
+                    try:
+                        from backend.engine.ocsf_normalizer import normalize_to_ocsf
+                        src_type = evt.get("source_type", "")
+                        vendor, product = _infer_vendor_product(src_type)
+                        if vendor:
+                            payload["_ocsf"] = normalize_to_ocsf(
+                                payload,
+                                vendor=vendor,
+                                product=product,
+                                source_type=src_type,
+                            )
+                    except Exception:
+                        pass
 
                     await self.store_event(session_id, {
                         "product_type": evt.get("source_type", "generic"),
