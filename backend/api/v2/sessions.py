@@ -6,9 +6,12 @@ Sessions track attack chain runs, event generation counts, and lifecycle.
 from __future__ import annotations
 
 import uuid
+import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
@@ -16,8 +19,10 @@ from sqlalchemy.orm import selectinload
 
 from backend.db.session import async_session
 from backend.db.models import SimulationSession, GeneratedEvent
+from backend.engine.session_manager import get_session_manager
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -27,6 +32,24 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 class SessionCreateRequest(BaseModel):
     name: str = Field("Untitled Session", max_length=255)
     config: dict[str, Any] = Field(default_factory=dict)
+    # Optional structured simulation params (stored into config JSONB)
+    environment_id: str | None = None
+    simulation_mode: str = Field("attack_chain")  # attack_chain | threat_actor | ttps | mcp_ingest
+    attack_chains: list[str] = Field(default_factory=list)
+    event_count: int = Field(200, ge=10, le=2000)
+    # Threat actor mode
+    threat_actor_id: str | None = None
+    threat_actor_name: str | None = None
+    threat_actor_ttps: list[str] = Field(default_factory=list)
+    # TTP mode
+    technique_ids: list[str] = Field(default_factory=list)
+    # MCP ingest mode
+    mcp_server_url: str | None = None
+    mcp_api_key: str | None = None
+    mcp_tool: str = Field("siem_search_events")
+    mcp_query: str | None = None
+    # Auto-start after creation
+    auto_start: bool = False
 
 
 class SessionUpdateRequest(BaseModel):
@@ -69,11 +92,48 @@ async def list_sessions(
 
 @router.post("")
 async def create_session(req: SessionCreateRequest):
-    """Create a new simulation session."""
+    """Create a new simulation session.
+
+    All structured simulation params (mode, chains, technique_ids, etc.)
+    are merged into the config JSONB so the engine can read them.
+    """
+    # Auto-generate a datetime-based name when the client sends the generic default
+    session_name = req.name
+    if not session_name or session_name in ("Untitled Session", ""):
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        mode_label = {
+            "attack_chain": "Attack Chain",
+            "threat_actor": req.threat_actor_name or "Threat Actor",
+            "ttps": "TTP Simulation",
+            "mcp_ingest": "MCP Ingest",
+        }.get(req.simulation_mode, req.simulation_mode.replace("_", " ").title())
+        session_name = f"{mode_label} — {ts}"
+
+    # Build merged config: explicit config dict + structured params
+    merged_config = dict(req.config)
+    merged_config.update({
+        "simulation_mode": req.simulation_mode,
+        "attack_chains": req.attack_chains,
+        "event_count": req.event_count,
+    })
+    if req.environment_id:
+        merged_config["environment_id"] = req.environment_id
+    if req.threat_actor_id:
+        merged_config["threat_actor_id"] = req.threat_actor_id
+        merged_config["threat_actor_name"] = req.threat_actor_name or req.threat_actor_id
+        merged_config["threat_actor_ttps"] = req.threat_actor_ttps
+    if req.technique_ids:
+        merged_config["technique_ids"] = req.technique_ids
+    if req.simulation_mode == "mcp_ingest" and req.mcp_server_url:
+        merged_config["mcp_server_url"] = req.mcp_server_url
+        merged_config["mcp_api_key"] = req.mcp_api_key or ""
+        merged_config["mcp_tool"] = req.mcp_tool
+        merged_config["mcp_query"] = req.mcp_query or ""
+
     async with async_session() as session:
         new_session = SimulationSession(
-            name=req.name,
-            config=req.config,
+            name=session_name,
+            config=merged_config,
             status="stopped",
             events_sent=0,
             errors=0,
@@ -81,7 +141,27 @@ async def create_session(req: SessionCreateRequest):
         session.add(new_session)
         await session.commit()
         await session.refresh(new_session)
-    return _session_to_dict(new_session)
+
+    result = _session_to_dict(new_session)
+
+    if req.auto_start:
+        try:
+            from backend.engine.session_manager import get_session_manager
+            sid = result["id"]
+            # Update status to running
+            async with async_session() as session:
+                row = await session.get(SimulationSession, uuid.UUID(sid))
+                if row:
+                    row.status = "running"
+                    row.updated_at = datetime.utcnow()
+                    await session.commit()
+            mgr = get_session_manager()
+            await mgr.start_session(sid, merged_config)
+            result["status"] = "running"
+        except Exception as exc:
+            logger.warning("auto_start failed for session %s: %s", result.get("id"), exc)
+
+    return result
 
 
 @router.get("/{session_id}")
@@ -120,7 +200,27 @@ async def update_session(session_id: str, req: SessionUpdateRequest):
             s.name = req.name
         if req.config is not None:
             s.config = req.config
-        s.updated_at = datetime.now(timezone.utc)
+        s.updated_at = datetime.utcnow()
+        await session.commit()
+        await session.refresh(s)
+    return _session_to_dict(s)
+
+
+@router.patch("/{session_id}/rename")
+async def rename_session(session_id: str, body: dict):
+    """Rename a session. Body: {"name": "new name"}"""
+    new_name = (body.get("name") or "").strip()
+    if not new_name:
+        raise HTTPException(400, detail="name is required")
+    async with async_session() as session:
+        result = await session.execute(
+            select(SimulationSession).where(SimulationSession.id == uuid.UUID(session_id))
+        )
+        s = result.scalar_one_or_none()
+        if not s:
+            raise HTTPException(404, detail=f"Session '{session_id}' not found.")
+        s.name = new_name[:255]
+        s.updated_at = datetime.utcnow()
         await session.commit()
         await session.refresh(s)
     return _session_to_dict(s)
@@ -162,7 +262,7 @@ async def start_session(session_id: str):
         s = result.scalar_one_or_none()
         if s:
             s.status = "running"
-            s.updated_at = datetime.now(timezone.utc)
+            s.updated_at = datetime.utcnow()
             await session.commit()
 
     # Wire engine scheduler
@@ -182,6 +282,116 @@ async def stop_session(session_id: str):
     """Stop event generation for a session."""
     await _do_stop(session_id)
     return {"status": "stopped", "id": session_id}
+
+
+@router.post("/{session_id}/resolve-mcp")
+async def resolve_mcp_source(session_id: str):
+    """Call the configured external MCP server to retrieve logs/events.
+
+    For sessions created with simulation_mode='mcp_ingest', this endpoint:
+    1. Reads mcp_server_url, mcp_api_key, mcp_tool, mcp_query from session config
+    2. Issues a JSON-RPC call to the external MCP server
+    3. Parses events/alerts to extract MITRE technique IDs
+    4. Updates session config with resolved technique_ids
+
+    Returns extracted techniques + raw sample events.
+    """
+    s = await _get_or_404(session_id)
+    cfg = s.config or {}
+
+    mcp_url = cfg.get("mcp_server_url", "")
+    mcp_key = cfg.get("mcp_api_key", "")
+    mcp_tool = cfg.get("mcp_tool", "siem_search_events")
+    mcp_query = cfg.get("mcp_query", "")
+
+    if not mcp_url:
+        raise HTTPException(400, detail="Session has no mcp_server_url configured.")
+
+    # Build JSON-RPC payload for the tool call
+    tool_args: dict[str, Any] = {}
+    if mcp_tool == "siem_search_events":
+        tool_args = {"query": mcp_query or "*", "time_range_hours": 24}
+    elif mcp_tool == "siem_get_alerts":
+        tool_args = {"limit": 50}
+    elif mcp_tool == "edr_get_detections":
+        tool_args = {"limit": 50}
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": mcp_tool, "arguments": tool_args},
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if mcp_key:
+        headers["X-API-Key"] = mcp_key
+
+    raw_events: list[dict] = []
+    extracted_ttps: list[str] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(mcp_url, json=payload, headers=headers)
+            resp.raise_for_status()
+            rpc_result = resp.json()
+
+        content = rpc_result.get("result", {})
+        if isinstance(content, dict):
+            # Handle different response shapes
+            raw_events = (
+                content.get("events")
+                or content.get("alerts")
+                or content.get("detections")
+                or []
+            )
+        elif isinstance(content, list):
+            raw_events = content
+
+        # Extract MITRE technique IDs from events
+        known_ttps: set[str] = set()
+        for ev in raw_events[:100]:
+            if not isinstance(ev, dict):
+                continue
+            # Common fields: technique_id, mitre_technique, tags, rule_name
+            for field in ("technique_id", "mitre_technique", "technique", "attack_technique"):
+                val = ev.get(field, "")
+                if val and str(val).upper().startswith("T"):
+                    known_ttps.add(str(val).upper())
+            # Parse tags array
+            for tag in ev.get("tags", []):
+                tag_str = str(tag)
+                if tag_str.upper().startswith("T") and len(tag_str) >= 5:
+                    known_ttps.add(tag_str.upper())
+
+        extracted_ttps = sorted(known_ttps)
+
+        # Update session config
+        async with async_session() as db:
+            row = await db.get(SimulationSession, uuid.UUID(session_id))
+            if row:
+                updated_cfg = dict(row.config or {})
+                updated_cfg["resolved_technique_ids"] = extracted_ttps
+                updated_cfg["mcp_event_count"] = len(raw_events)
+                if extracted_ttps and not updated_cfg.get("technique_ids"):
+                    updated_cfg["technique_ids"] = extracted_ttps
+                row.config = updated_cfg
+                row.updated_at = datetime.utcnow()
+                await db.commit()
+
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, detail=f"MCP server unreachable: {exc}")
+    except Exception as exc:
+        logger.warning("MCP resolve failed for session %s: %s", session_id, exc)
+        raise HTTPException(500, detail=f"MCP resolve error: {exc}")
+
+    return {
+        "session_id": session_id,
+        "mcp_tool": mcp_tool,
+        "events_retrieved": len(raw_events),
+        "extracted_techniques": extracted_ttps,
+        "sample_events": raw_events[:5],
+    }
 
 
 @router.get("/{session_id}/events/stream")
@@ -375,6 +585,44 @@ async def get_session_events(
     }
 
 
+@router.get("/{session_id}/context")
+async def get_session_context(session_id: str):
+    """Return the SimulationContext entities for this session.
+
+    Shows the victim user/hostname/IP, attacker IP/C2 domain, and whether
+    values came from real CMDB data or were synthetically generated.
+    Returns 404 if the session doesn't exist; returns an empty context dict
+    if the session was created before SimulationContext support was added.
+    """
+    await _get_or_404(session_id)
+    mgr = get_session_manager()
+    # Check in-memory cache first (populated during start_session)
+    cached = mgr._sessions.get(session_id, {})
+    ctx = cached.get("simulation_context")
+    if ctx is None:
+        # Fall back to Redis
+        try:
+            import os
+            import redis.asyncio as aioredis
+            from backend.engine.simulation_context import load_context
+            r = aioredis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
+            sim_ctx = await load_context(session_id, r)
+            if sim_ctx:
+                ctx = {
+                    "victim_username": sim_ctx.victim_username,
+                    "victim_hostname": sim_ctx.victim_hostname,
+                    "victim_ip": sim_ctx.victim_ip,
+                    "attacker_ip": sim_ctx.attacker_ip,
+                    "c2_domain": sim_ctx.c2_domain,
+                    "malware_filename": sim_ctx.malware_filename,
+                    "domain": sim_ctx.domain,
+                    "from_cmdb": sim_ctx.from_cmdb,
+                }
+        except Exception:
+            pass
+    return {"session_id": session_id, "context": ctx or {}}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -404,7 +652,7 @@ async def _do_stop(session_id: str) -> None:
         s = result.scalar_one_or_none()
         if s and s.status == "running":
             s.status = "stopped"
-            s.updated_at = datetime.now(timezone.utc)
+            s.updated_at = datetime.utcnow()
             await session.commit()
     try:
         from backend.engine.session_manager import get_session_manager
@@ -435,6 +683,7 @@ def _event_to_dict(e: GeneratedEvent) -> dict[str, Any]:
         "product_type": e.product_type,
         "severity": e.severity,
         "title": e.title,
+        "payload": e.payload or {},
         "success": e.success,
         "status_code": e.status_code,
         "created_at": e.created_at.isoformat(),

@@ -79,8 +79,9 @@ class _CacheBackend:
             return self._redis
         self._redis_checked = True
         try:
+            import os
             import redis.asyncio as aioredis
-            r = aioredis.from_url("redis://localhost:6379", decode_responses=True)
+            r = aioredis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
             await r.ping()
             self._redis = r
             logger.info("AgenticGenerator: Redis cache connected")
@@ -170,8 +171,17 @@ def _jitter_time(base: datetime, max_seconds: int = 120) -> str:
     return (base + delta).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def _render_template(template: dict[str, Any], base_time: datetime) -> dict[str, Any]:
-    """Deep-copy a template and inject live/randomised values."""
+def _render_template(
+    template: dict[str, Any],
+    base_time: datetime,
+    subs: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Deep-copy a template and inject live/context values.
+
+    If ``subs`` is provided (from SimulationContext.to_substitution_map()),
+    tokens like __USER__ and __HOST__ resolve to the session's fixed entities
+    rather than random pool picks, making multi-source logs coherent.
+    """
     event = json.loads(json.dumps(template, default=str))
 
     def _walk(obj: Any) -> Any:
@@ -183,13 +193,13 @@ def _render_template(template: dict[str, Any], base_time: datetime) -> dict[str,
             if obj == "__TIMESTAMP__":
                 return _jitter_time(base_time)
             if obj == "__USER__":
-                return random.choice(_FAKE_USERS)
+                return subs.get("__USER__") if subs else random.choice(_FAKE_USERS)
             if obj == "__HOST__":
-                return random.choice(_FAKE_HOSTS)
+                return subs.get("__HOST__") if subs else random.choice(_FAKE_HOSTS)
             if obj == "__INTERNAL_IP__":
-                return _random_ip(internal=True)
+                return subs.get("__INTERNAL_IP__") if subs else _random_ip(internal=True)
             if obj == "__EXTERNAL_IP__":
-                return _random_ip(internal=False)
+                return subs.get("__EXTERNAL_IP__") if subs else _random_ip(internal=False)
         return obj
 
     rendered = _walk(event)
@@ -206,22 +216,23 @@ You are a cybersecurity log synthesis expert. Generate realistic log events for 
 
 ## Log Source Schema
 {schema_text}
-
+{context_block}
 ## Task
 Generate {count} realistic log events showing technique **{technique_id}** ({technique_name}).
 
 ## Rules
 1. Events MUST conform strictly to the schema above (use correct field names and types).
-2. Make events varied — different users, hosts, IPs, timestamps, command lines.
-3. Use placeholder tokens for fields that should be randomised at render time:
+2. Use the simulation context values above — DO NOT invent different hostnames, IPs, or usernames.
+3. Use placeholder tokens ONLY for fields the caller will randomise at render time:
    - `"__TIMESTAMP__"` for any timestamp field
-   - `"__USER__"` for a username
-   - `"__HOST__"` for a hostname
-   - `"__INTERNAL_IP__"` for internal IP addresses
-   - `"__EXTERNAL_IP__"` for attacker/external IPs
-4. Include realistic attack-pattern indicators (not obviously fake).
-5. Do NOT include markdown fences — return ONLY a valid JSON array of event objects.
-6. Target event types from schema mitre_mappings for this technique where possible.
+   - `"__USER__"` for the victim username (resolves to the context value at render time)
+   - `"__HOST__"` for the victim hostname
+   - `"__INTERNAL_IP__"` for the victim's internal IP
+   - `"__EXTERNAL_IP__"` for the attacker's external IP
+4. Hard-code the attacker C2 domain, malware hash, and other unique IOCs from the context directly.
+5. Include realistic attack-pattern indicators (not obviously fake).
+6. Do NOT include markdown fences — return ONLY a valid JSON array of event objects.
+7. Target event types from schema mitre_mappings for this technique where possible.
 
 Return a JSON array of {count} event objects. No explanation, no markdown — raw JSON only.
 """
@@ -231,16 +242,17 @@ You are a cybersecurity log synthesis expert. Generate realistic BENIGN (normal)
 
 ## Log Source Schema
 {schema_text}
-
+{context_block}
 ## Task
 Generate {count} realistic normal/benign events from this log source — day-to-day business activity.
 
 ## Rules
 1. Events MUST conform to the schema above.
-2. Use placeholder tokens: `"__TIMESTAMP__"`, `"__USER__"`, `"__HOST__"`, `"__INTERNAL_IP__"`, `"__EXTERNAL_IP__"`.
-3. Make events varied (different users, hosts, actions).
-4. No attack indicators.
-5. Return ONLY a valid JSON array — no markdown, no explanation.
+2. Use context entities where provided (hostname, username, domain, internal IPs).
+3. Use placeholder tokens: `"__TIMESTAMP__"`, `"__USER__"`, `"__HOST__"`, `"__INTERNAL_IP__"`, `"__EXTERNAL_IP__"`.
+4. Make events varied (different users, hosts, actions) but stay within the simulated environment.
+5. No attack indicators.
+6. Return ONLY a valid JSON array — no markdown, no explanation.
 
 Return a JSON array of {count} event objects.
 """
@@ -298,6 +310,7 @@ class AgenticLogGenerator:
             source_id="windows_sysmon",
             technique_id="T1059.001",
             count=20,
+            context=sim_ctx,   # optional SimulationContext for entity coherence
         )
     """
 
@@ -319,6 +332,7 @@ class AgenticLogGenerator:
         count: int = 10,
         snr_ratio: float = 1.0,
         force_refresh: bool = False,
+        context: Any = None,   # SimulationContext | None
     ) -> dict[str, Any]:
         """Generate ``count`` log events for a source + technique pair.
 
@@ -345,16 +359,28 @@ class AgenticLogGenerator:
         attack_count = max(1, round(count * snr_ratio))
         benign_count = count - attack_count
 
+        # Build per-session substitution map and prompt context block from SimulationContext
+        subs: dict[str, str] | None = None
+        context_block = ""
+        if context is not None:
+            try:
+                subs = context.to_substitution_map()
+                context_block = "\n## Simulation Context\n" + context.to_prompt_context() + "\n"
+            except Exception:
+                pass
+
         # Generate attack events
         attack_events, attack_cache_hit = await self._get_attack_events(
-            schema, technique_id, attack_count, force_refresh
+            schema, technique_id, attack_count, force_refresh,
+            subs=subs, context_block=context_block,
         )
 
         # Generate benign noise if requested
         benign_events: list[dict[str, Any]] = []
         if benign_count > 0:
             benign_events, _ = await self._get_benign_events(
-                schema, benign_count, force_refresh
+                schema, benign_count, force_refresh,
+                subs=subs, context_block=context_block,
             )
 
         # Merge + shuffle
@@ -378,13 +404,24 @@ class AgenticLogGenerator:
         source_id: str,
         count: int = 10,
         force_refresh: bool = False,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Generate purely benign/noise events for a source."""
         schema = self._registry.get(source_id)
         if not schema:
             return {"error": f"Unknown source_id '{source_id}'", "events": []}
 
-        events, cache_hit = await self._get_benign_events(schema, count, force_refresh)
+        subs: dict[str, str] | None = None
+        context_block = ""
+        if context is not None:
+            try:
+                subs = context.to_substitution_map()
+                context_block = "\n## Simulation Context\n" + context.to_prompt_context() + "\n"
+            except Exception:
+                pass
+
+        events, cache_hit = await self._get_benign_events(schema, count, force_refresh,
+                                                           subs=subs, context_block=context_block)
         return {
             "status": "success",
             "source_id": source_id,
@@ -434,8 +471,14 @@ class AgenticLogGenerator:
         technique_id: str,
         count: int,
         force_refresh: bool,
+        subs: dict[str, str] | None = None,
+        context_block: str = "",
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Return attack events, using/populating the template cache."""
+        """Return attack events, using/populating the template cache.
+
+        Templates are cached without context so they can be reused across
+        sessions. The ``subs`` map is applied at render time, never stored.
+        """
         cache_key = self._attack_cache_key(
             schema.source_id, schema.version, technique_id
         )
@@ -451,7 +494,6 @@ class AgenticLogGenerator:
                 )
 
         if not templates:
-            # Need to fetch from MITRE to get technique name
             technique_name = await _lookup_technique_name(technique_id)
             schema_text = self._registry.get_schema_text(schema.source_id)
 
@@ -460,6 +502,7 @@ class AgenticLogGenerator:
                 count=self.TEMPLATE_BATCH_SIZE,
                 technique_id=technique_id,
                 technique_name=technique_name,
+                context_block=context_block,
             )
             templates = await _call_claude_for_templates(prompt)
 
@@ -470,7 +513,6 @@ class AgenticLogGenerator:
                 )
                 templates = _fallback_templates(schema, technique_id)
 
-            # Tag all attack templates
             for t in templates:
                 t["_purplelab_technique"] = technique_id
                 t["_purplelab_source"] = schema.source_id
@@ -482,13 +524,15 @@ class AgenticLogGenerator:
                 len(templates), schema.source_id, technique_id,
             )
 
-        return _render_n(templates, count), cache_hit
+        return _render_n(templates, count, subs=subs), cache_hit
 
     async def _get_benign_events(
         self,
         schema: Any,
         count: int,
         force_refresh: bool,
+        subs: dict[str, str] | None = None,
+        context_block: str = "",
     ) -> tuple[list[dict[str, Any]], bool]:
         """Return benign events, using/populating the noise template cache."""
         cache_key = self._benign_cache_key(schema.source_id, schema.version)
@@ -505,6 +549,7 @@ class AgenticLogGenerator:
             prompt = _BENIGN_PROMPT.format(
                 schema_text=schema_text,
                 count=self.TEMPLATE_BATCH_SIZE,
+                context_block=context_block,
             )
             templates = await _call_claude_for_templates(prompt)
 
@@ -517,7 +562,7 @@ class AgenticLogGenerator:
 
             await _cache.set(cache_key, templates, ttl=self.TEMPLATE_CACHE_TTL)
 
-        return _render_n(templates, count), cache_hit
+        return _render_n(templates, count, subs=subs), cache_hit
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +570,9 @@ class AgenticLogGenerator:
 # ---------------------------------------------------------------------------
 
 def _render_n(
-    templates: list[dict[str, Any]], count: int
+    templates: list[dict[str, Any]],
+    count: int,
+    subs: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Render ``count`` events from a template list (repeating if needed)."""
     if not templates:
@@ -534,7 +581,7 @@ def _render_n(
     events = []
     for i in range(count):
         tpl = templates[i % len(templates)]
-        events.append(_render_template(tpl, base_time - timedelta(seconds=i * 3)))
+        events.append(_render_template(tpl, base_time - timedelta(seconds=i * 3), subs=subs))
     return events
 
 

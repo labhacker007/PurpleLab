@@ -5,9 +5,12 @@ import random
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from backend.engine.simulation_context import SimulationContext
 
 
 # ── Shared IOC / TTP data pools ──────────────────────────────────────────────
@@ -120,6 +123,11 @@ class BaseGenerator(ABC):
 
     def __init__(self, config: GeneratorConfig):
         self.config = config
+        self._ctx: "SimulationContext | None" = None
+
+    def set_context(self, ctx: "SimulationContext") -> None:
+        """Bind a SimulationContext so all _pick_* methods return consistent values."""
+        self._ctx = ctx
 
     def _pick_severity(self) -> str:
         w = self.config.severity_weights
@@ -127,19 +135,29 @@ class BaseGenerator(ABC):
         weights = [w[c] for c in choices]
         return random.choices(choices, weights=weights, k=1)[0]
 
-    def _pick_ip(self) -> str:
+    def _pick_ip(self, attacker: bool = True) -> str:
+        if self._ctx:
+            return self._ctx.attacker_ip if attacker else self._ctx.victim_ip
         return random.choice(MALICIOUS_IPS)
 
     def _pick_domain(self) -> str:
+        if self._ctx and self._ctx.c2_domain:
+            return self._ctx.c2_domain
         return random.choice(MALICIOUS_DOMAINS)
 
     def _pick_hash(self) -> str:
+        if self._ctx and self._ctx.malware_hash_md5:
+            return self._ctx.malware_hash_md5
         return random.choice(MALICIOUS_HASHES)
 
-    def _pick_host(self) -> str:
+    def _pick_host(self, victim: bool = True) -> str:
+        if self._ctx:
+            return self._ctx.victim_hostname if victim else self._ctx.lateral_hostname
         return random.choice(HOSTNAMES)
 
     def _pick_user(self) -> str:
+        if self._ctx and self._ctx.victim_username:
+            return self._ctx.victim_username
         return random.choice(USERNAMES)
 
     def _pick_technique(self) -> tuple[str, str]:
@@ -150,7 +168,7 @@ class BaseGenerator(ABC):
         template = random.choice(templates)
         return template.format(
             host=self._pick_host(), ip=self._pick_ip(),
-            user=self._pick_user(), target=self._pick_host(),
+            user=self._pick_user(), target=self._pick_host(victim=False),
         )
 
     def _now_iso(self) -> str:
