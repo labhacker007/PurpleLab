@@ -1,6 +1,13 @@
 """Pipeline management REST API.
 
-Provides CRUD and run-control endpoints for continuous purple team pipelines.
+Two distinct pipeline concepts live here:
+  1. Continuous pipelines  — scheduled PipelineConfig/PipelineRun entities (CRUD + run-control)
+  2. Agentic block pipelines — ad-hoc block compositions the AI agent produces and runs on-demand
+
+Block pipeline endpoints (prefix /pipeline/blocks, /pipeline/compose):
+  GET  /pipeline/blocks          → block registry (schemas only — what the AI sees)
+  POST /pipeline/compose/validate → validate a pipeline JSON before running
+  POST /pipeline/compose/run      → execute an ad-hoc pipeline JSON
 """
 from __future__ import annotations
 
@@ -19,6 +26,103 @@ from backend.db.models import PipelineConfig, PipelineRun
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
+
+
+# ── Block registry & ad-hoc compose ─────────────────────────────────────────
+# IMPORTANT: these routes must be defined BEFORE /{pipeline_id} to avoid routing conflicts.
+
+@router.get("/blocks")
+async def list_blocks() -> dict[str, Any]:
+    """Return the full block registry — what the AI uses to compose pipelines.
+
+    Schema-only: each block's id, category, label, description, typed inputs, typed outputs.
+    No implementation details are exposed.
+    """
+    from backend.agent.pipeline.blocks import BLOCK_REGISTRY
+    from backend.agent.tools.pipeline_tools import _PIPELINE_TEMPLATES
+
+    by_category: dict[str, list[dict]] = {}
+    for block in BLOCK_REGISTRY.values():
+        by_category.setdefault(block.category, []).append(block.schema())
+
+    # Also surface the pre-built templates so the frontend/AI can use them
+    templates = [
+        {
+            "id": tid,
+            "name": t["name"],
+            "description": t["description"],
+            "step_count": len(t["steps"]),
+            "step_blocks": [s["block"] for s in t["steps"]],
+        }
+        for tid, t in _PIPELINE_TEMPLATES.items()
+    ]
+
+    return {
+        "blocks_by_category": by_category,
+        "total_blocks": sum(len(v) for v in by_category.values()),
+        "templates": templates,
+        "composition_syntax": (
+            "Set any input value to {{step_id.output_key}} to reference a prior step's output. "
+            "The engine resolves templates, builds a dependency DAG, and runs independent steps in parallel."
+        ),
+    }
+
+
+class ComposeValidateRequest(BaseModel):
+    pipeline: dict[str, Any]
+
+
+class ComposeRunRequest(BaseModel):
+    pipeline: dict[str, Any]
+
+
+@router.post("/compose/validate")
+async def validate_compose(body: ComposeValidateRequest) -> dict[str, Any]:
+    """Validate a pipeline JSON before executing it.
+
+    Returns errors list (empty = valid). Also returns the execution plan
+    (wave order) so the caller can see what will run in parallel.
+    """
+    from backend.agent.pipeline.executor import validate_pipeline, _topological_waves
+
+    errors = validate_pipeline(body.pipeline)
+    if errors:
+        return {"valid": False, "errors": errors, "execution_plan": []}
+
+    steps = body.pipeline.get("steps", [])
+    waves = _topological_waves(steps)
+    plan = [
+        {
+            "wave": i + 1,
+            "parallel_steps": [s.get("id") for s in wave],
+        }
+        for i, wave in enumerate(waves)
+    ]
+    return {
+        "valid": True,
+        "errors": [],
+        "execution_plan": plan,
+        "wave_count": len(waves),
+        "step_count": len(steps),
+    }
+
+
+@router.post("/compose/run")
+async def run_compose(body: ComposeRunRequest) -> dict[str, Any]:
+    """Execute an ad-hoc pipeline JSON immediately.
+
+    This is the REST equivalent of the agent's run_pipeline() tool call.
+    The pipeline runs synchronously — caller receives the full result.
+    """
+    from backend.agent.pipeline.executor import PipelineExecutor
+
+    executor = PipelineExecutor()
+    try:
+        result = await executor.run(body.pipeline)
+    except Exception as exc:
+        logger.error("compose_run_error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    return result
 
 
 # ---------------------------------------------------------------------------

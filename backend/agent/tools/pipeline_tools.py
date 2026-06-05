@@ -131,22 +131,28 @@ def _list_blocks() -> dict[str, Any]:
     from backend.agent.pipeline.blocks import BLOCK_REGISTRY
     by_category: dict[str, list[dict]] = {}
     for block in BLOCK_REGISTRY.values():
-        cat = block.category
-        if cat not in by_category:
-            by_category[cat] = []
-        by_category[cat].append({
+        by_category.setdefault(block.category, []).append({
             "id": block.block_id,
             "label": block.label,
             "description": block.description,
-            "inputs": {k: v.get("description", v.get("type", "")) for k, v in block.inputs.items()},
-            "outputs": list(block.outputs.keys()),
+            "inputs": {
+                k: {"type": v.get("type", "string"), "required": v.get("required", False),
+                    "description": v.get("description", "")}
+                for k, v in block.inputs.items()
+            },
+            "outputs": {k: v.get("type", "string") for k, v in block.outputs.items()},
+            "tags": block.tags,
         })
     total = sum(len(v) for v in by_category.values())
     return {
         "categories": by_category,
         "total_blocks": total,
-        "hint": "Compose these blocks into a pipeline dict and call run_pipeline(). "
-                "Or call get_pipeline_templates() for pre-built recipes.",
+        "hint": (
+            "To run a pipeline: compose a JSON with {name, steps:[{id, block, inputs}]} "
+            "and call run_pipeline(). Use {{step_id.output_key}} to chain outputs as inputs. "
+            "Independent steps run in parallel automatically. "
+            "Or call get_pipeline_templates() for 4 ready-to-run recipes."
+        ),
     }
 
 
