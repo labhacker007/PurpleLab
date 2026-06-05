@@ -36,6 +36,7 @@ import {
   ChevronRight as ArrowRight,
   PanelRight,
   MapPin,
+  Cpu,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { streamSSE, apiGet, apiDelete, API_BASE } from '@/lib/api/client'
@@ -248,6 +249,254 @@ function TypingIndicator({ label }: { label?: string }) {
         ))}
       </div>
       {label && <span className="text-[11px] text-slate-500 italic">{label}</span>}
+    </div>
+  )
+}
+
+// ─── Evidence chain ──────────────────────────────────────────────────────────
+
+interface EvidenceStep {
+  callId: string
+  toolName: string
+  args: Record<string, unknown>
+  result: unknown
+  isError: boolean
+  timestamp: number
+}
+
+interface DisplayGroup {
+  id: string
+  kind: 'user' | 'assistant'
+  msg: Message
+  evidenceSteps: EvidenceStep[]
+}
+
+/** Map tool function names to short human-readable labels. */
+const TOOL_LABELS: Record<string, string> = {
+  list_environments: 'Listed environments',
+  get_environment: 'Fetched environment',
+  create_environment: 'Created environment',
+  quick_environment_setup: 'Set up environment',
+  list_environment_templates: 'Listed templates',
+  configure_environment: 'Configured environment',
+  apply_threat_profile: 'Applied threat profile',
+  list_scenarios: 'Searched scenarios',
+  run_scenario: 'Ran scenario',
+  list_use_cases: 'Listed use cases',
+  get_use_case_coverage: 'Checked coverage',
+  get_failing_use_cases: 'Found failing detections',
+  create_use_case: 'Created use case',
+  run_use_case: 'Ran detection test',
+  run_all_use_cases: 'Ran all detection tests',
+  get_des_score: 'Fetched DES score',
+  get_ihds_score: 'Fetched IHDS score',
+  get_scoring_gap_analysis: 'Analysed coverage gaps',
+  get_scoring_breakdown: 'Got scoring breakdown',
+  generate_report: 'Generated report',
+  get_session_report: 'Fetched session report',
+  list_pipelines: 'Listed pipelines',
+  run_pipeline: 'Ran pipeline',
+  get_pipeline_coverage_gaps: 'Found pipeline gaps',
+  list_threat_profiles: 'Listed threat profiles',
+  tip_search: 'Searched threat intel',
+  list_siem_connections: 'Listed SIEM connections',
+  connect_siem: 'Connected SIEM',
+  save_context: 'Saved context',
+  list_sessions: 'Listed sessions',
+  get_session: 'Fetched session',
+}
+
+function extractResultSummary(toolName: string, result: unknown): string {
+  if (result == null) return ''
+  let d: Record<string, unknown>
+  try {
+    d = typeof result === 'string' ? JSON.parse(result) : (result as Record<string, unknown>)
+    d = (d?.data as Record<string, unknown>) ?? d
+  } catch { return '' }
+
+  switch (toolName) {
+    case 'quick_environment_setup':
+      return `"${d?.environment_name ?? ''}" · ${d?.technique_count ?? 0} TTPs`
+    case 'create_environment':
+      return `"${d?.name ?? ''}"`
+    case 'list_environments':
+      return `${d?.total ?? 0} environment${(d?.total as number) !== 1 ? 's' : ''}`
+    case 'apply_threat_profile':
+      return `${d?.technique_count ?? d?.technique_ids?.length ?? 0} TTPs`
+    case 'run_scenario':
+    case 'get_session':
+      return d?.id ? `session ${String(d.id).slice(0, 8)}` : ''
+    case 'get_des_score':
+      return `DES ${d?.score ?? '?'}%`
+    case 'get_ihds_score':
+      return `IHDS ${d?.score ?? '?'}%`
+    case 'get_scoring_gap_analysis': {
+      const gaps = Array.isArray(d?.gaps) ? d.gaps.length : d?.gap_count ?? '?'
+      return `${gaps} gaps found`
+    }
+    case 'list_use_cases':
+    case 'get_failing_use_cases': {
+      const items = Array.isArray(d?.use_cases) ? d.use_cases.length : d?.total ?? '?'
+      return `${items} use case${items !== 1 ? 's' : ''}`
+    }
+    case 'run_use_case':
+      return d?.status === 'passed' ? 'Passed ✓' : d?.status === 'failed' ? 'Failed ✗' : ''
+    case 'generate_report':
+      return d?.report_id ? `ID ${String(d.report_id).slice(0, 8)}` : ''
+    case 'list_environment_templates':
+      return `${d?.total ?? 0} templates`
+    default:
+      if (d?.status === 'error' || d?.message?.toString().toLowerCase().startsWith('error')) return ''
+      if (typeof d?.name === 'string') return `"${d.name}"`
+      if (typeof d?.total === 'number') return `${d.total} results`
+      return ''
+  }
+}
+
+/**
+ * Group the flat messages array into display groups:
+ * consecutive tool_call / tool_result messages are bundled
+ * with the assistant message that follows them.
+ */
+function groupMessages(messages: Message[]): DisplayGroup[] {
+  const groups: DisplayGroup[] = []
+  let i = 0
+  while (i < messages.length) {
+    const msg = messages[i]
+    if (msg.role === 'user') {
+      groups.push({ id: msg.id, kind: 'user', msg, evidenceSteps: [] })
+      i++
+      continue
+    }
+    if (msg.role === 'tool_call' || msg.role === 'tool_result') {
+      // Collect the entire tool exchange for this turn
+      const callMap = new Map<string, { toolName: string; args: Record<string, unknown>; ts: number }>()
+      const resultMap = new Map<string, { content: unknown; ts: number }>()
+      const order: string[] = []
+      while (i < messages.length && (messages[i].role === 'tool_call' || messages[i].role === 'tool_result')) {
+        const m = messages[i]
+        if (m.role === 'tool_call' && m.tool_call) {
+          callMap.set(m.tool_call.id, { toolName: m.tool_call.name, args: m.tool_call.args, ts: m.timestamp })
+          if (!order.includes(m.tool_call.id)) order.push(m.tool_call.id)
+        } else if (m.role === 'tool_result' && m.tool_result) {
+          resultMap.set(m.tool_result.tool_call_id, { content: m.tool_result.content, ts: m.timestamp })
+          if (!order.includes(m.tool_result.tool_call_id)) order.push(m.tool_result.tool_call_id)
+        }
+        i++
+      }
+      const evidenceSteps: EvidenceStep[] = order.map(id => {
+        const call = callMap.get(id)
+        const res = resultMap.get(id)
+        const raw = res?.content
+        const rawStr = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
+        return {
+          callId: id,
+          toolName: call?.toolName ?? '?',
+          args: call?.args ?? {},
+          result: raw,
+          isError: rawStr.toLowerCase().startsWith('error'),
+          timestamp: call?.ts ?? res?.ts ?? 0,
+        }
+      })
+      // Associate with the next assistant message (if already arrived)
+      if (i < messages.length && messages[i].role === 'assistant') {
+        groups.push({ id: messages[i].id, kind: 'assistant', msg: messages[i], evidenceSteps })
+        i++
+      } else {
+        // Still streaming — show evidence without the final text yet
+        const placeholder: Message = { id: `pending-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() }
+        groups.push({ id: placeholder.id, kind: 'assistant', msg: placeholder, evidenceSteps })
+      }
+      continue
+    }
+    if (msg.role === 'assistant') {
+      groups.push({ id: msg.id, kind: 'assistant', msg, evidenceSteps: [] })
+      i++
+    } else {
+      i++ // skip unknown
+    }
+  }
+  return groups
+}
+
+// ── Evidence step row ─────────────────────────────────────────────────────────
+
+function EvidenceStepRow({ step, index }: { step: EvidenceStep; index: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const label = TOOL_LABELS[step.toolName] ?? step.toolName.replace(/_/g, ' ')
+  const summary = extractResultSummary(step.toolName, step.result)
+  const rawStr = typeof step.result === 'string' ? step.result : JSON.stringify(step.result ?? {}, null, 2)
+  const argsStr = JSON.stringify(step.args, null, 2)
+
+  return (
+    <div className={cn(
+      'rounded border-l-2 overflow-hidden text-[11px] font-mono',
+      step.isError ? 'border-l-red-500/60 bg-red-500/5' : 'border-l-violet-500/40 bg-slate-800/30'
+    )}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-slate-700/30 transition-colors"
+      >
+        <span className="text-slate-600 shrink-0 w-4 text-center">{index + 1}.</span>
+        {step.isError
+          ? <AlertCircle className="h-3 w-3 text-red-400 shrink-0" />
+          : <Check className="h-3 w-3 text-emerald-400 shrink-0" />
+        }
+        <span className={cn('font-medium', step.isError ? 'text-red-300' : 'text-slate-200')}>{label}</span>
+        {summary && !step.isError && (
+          <span className="text-slate-500 truncate">— {summary}</span>
+        )}
+        <ChevronDown className={cn('h-3 w-3 ml-auto shrink-0 text-slate-600 transition-transform', expanded && 'rotate-180')} />
+      </button>
+      {expanded && (
+        <div className="border-t border-slate-700/40 px-2.5 py-2 space-y-2">
+          {Object.keys(step.args).length > 0 && (
+            <div>
+              <p className="text-[10px] text-slate-600 mb-1 uppercase tracking-wide">Input</p>
+              <pre className="text-slate-400 whitespace-pre-wrap break-all text-[10px] bg-black/20 rounded p-1.5 overflow-x-auto">{argsStr}</pre>
+            </div>
+          )}
+          <div>
+            <p className="text-[10px] text-slate-600 mb-1 uppercase tracking-wide">Output</p>
+            <pre className={cn('whitespace-pre-wrap break-all text-[10px] bg-black/20 rounded p-1.5 overflow-x-auto max-h-48', step.isError ? 'text-red-300/80' : 'text-emerald-300/70')}>{rawStr}</pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Turn evidence chain ───────────────────────────────────────────────────────
+
+function TurnEvidenceChain({ steps }: { steps: EvidenceStep[] }) {
+  const [open, setOpen] = useState(false)
+  if (!steps.length) return null
+  const errorCount = steps.filter(s => s.isError).length
+  return (
+    <div className="mb-1.5 w-full max-w-[80%]">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={cn(
+          'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+          errorCount > 0
+            ? 'border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/10'
+            : 'border-violet-500/20 bg-violet-500/5 text-slate-400 hover:bg-violet-500/10 hover:text-slate-300'
+        )}
+      >
+        <Cpu className="h-3 w-3 text-violet-400 shrink-0" />
+        <span>
+          {steps.length} action{steps.length !== 1 ? 's' : ''} taken
+          {errorCount > 0 && <span className="text-red-400 ml-1">· {errorCount} error{errorCount > 1 ? 's' : ''}</span>}
+        </span>
+        <ChevronDown className={cn('h-3 w-3 ml-1 transition-transform text-slate-600', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-0.5 pl-1">
+          {steps.map((step, i) => (
+            <EvidenceStepRow key={step.callId} step={step} index={i} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -966,17 +1215,33 @@ function ChatPageInner() {
             <GoalPresets onSelect={handleGoalPreset} />
           )}
 
-          {messages.map((msg) => {
-            const isLastAssistant = msg.id === lastAssistantId
+          {groupMessages(messages).map((group) => {
+            if (group.kind === 'user') {
+              return (
+                <MessageBubble
+                  key={group.id}
+                  msg={group.msg}
+                  isLast={false}
+                />
+              )
+            }
+            // Assistant turn — show evidence chain above the response
+            const isLastAssistant = group.msg.id === lastAssistantId
             return (
-              <MessageBubble
-                key={msg.id}
-                msg={msg}
-                isLast={isLastAssistant && !isStreaming}
-                onRegenerate={isLastAssistant && !isStreaming ? handleRegenerate : undefined}
-                followUpSuggestions={isLastAssistant && !isStreaming ? followUps : undefined}
-                onFollowUp={isLastAssistant && !isStreaming ? (s) => void sendMessage(s) : undefined}
-              />
+              <div key={group.id} className="flex flex-col items-start px-4 py-1">
+                {/* Evidence chain (collapsed by default) */}
+                <TurnEvidenceChain steps={group.evidenceSteps} />
+                {/* Assistant response text */}
+                {group.msg.content ? (
+                  <MessageBubble
+                    msg={group.msg}
+                    isLast={isLastAssistant && !isStreaming}
+                    onRegenerate={isLastAssistant && !isStreaming ? handleRegenerate : undefined}
+                    followUpSuggestions={isLastAssistant && !isStreaming ? followUps : undefined}
+                    onFollowUp={isLastAssistant && !isStreaming ? (s) => void sendMessage(s) : undefined}
+                  />
+                ) : null}
+              </div>
             )
           })}
 
