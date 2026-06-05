@@ -947,3 +947,26 @@ def register_tools(registry: ToolRegistry) -> None:  # noqa: C901
         "Get a high-level summary of PurpleLab — environments, recent sessions, and use case coverage. Good for starting a conversation.",
         {"type": "object", "properties": {}},
         _get_platform_summary)
+
+    # ── Pipeline (modular Lego blocks) ────────────────────────────────────────
+    from backend.agent.tools.pipeline_tools import register_pipeline_tools
+    _pipeline_tool_map: dict = {}
+    _pipeline_schema_list: list = []
+    register_pipeline_tools(_pipeline_tool_map, _pipeline_schema_list)
+    for _schema in _pipeline_schema_list:
+        _tname = _schema["name"]
+        _tfn_raw = _pipeline_tool_map[_tname]
+        # wrap sync fns into async if needed
+        import asyncio as _asyncio
+        import inspect as _inspect
+        if _inspect.iscoroutinefunction(_tfn_raw):
+            async def _make_async_wrapper(fn=_tfn_raw):
+                async def _wrapped(**kwargs):
+                    return await fn(**kwargs)
+                return _wrapped
+            # simpler: just register directly
+            registry.register(_tname, _schema["description"], _schema["input_schema"], _tfn_raw)
+        else:
+            async def _sync_wrapper(fn=_tfn_raw, **kwargs):
+                return fn(**kwargs)
+            registry.register(_tname, _schema["description"], _schema["input_schema"], _sync_wrapper)

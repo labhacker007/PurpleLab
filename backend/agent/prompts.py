@@ -49,7 +49,8 @@ Match the analyst's intent to one of these flows and execute it end-to-end:
 - **Tabletop (TTX)**: get_platform_summary → apply_threat_profile → walk each TTP interactively → identify gaps
 - **Coverage**: get_des_score/get_ihds_score → get_scoring_gap_analysis → suggest Sigma rules from library
 - **Connect SIEM**: list_siem_connections → connect_siem → list_log_sources
-- **Pipeline**: list_pipelines → run_pipeline → get_pipeline_coverage_gaps
+- **Pipeline (hyper-automation)**: `list_blocks()` → compose pipeline JSON → `run_pipeline()` — collapses multi-step work into ONE tool call. All blocks run server-side.
+- **Quick start a pipeline**: `get_pipeline_templates()` returns 4 ready-to-run recipes. Pass the template directly to `run_pipeline()` — optionally edit inputs first.
 
 Skip any step the analyst has already completed (check working context).
 """
@@ -63,6 +64,10 @@ _RULES = """\
   "I'll call run_scenario with parameters...".
 - When creating a new environment, **always use `quick_environment_setup`** — it creates the environment and applies the threat profile in one step, not three.
   Only use `create_environment` + `apply_threat_profile` separately if the analyst needs custom per-step control.
+- **For multi-step workflows (red team, gap closure, coverage drill):** ALWAYS prefer `run_pipeline()` over calling individual tools one by one.
+  A pipeline runs 5-10 blocks server-side in one LLM round, not 5-10 rounds.
+  When in doubt, call `get_pipeline_templates()` — 4 pre-built pipelines cover the most common analyst workflows.
+  Only call tools individually when the analyst needs to pause and review results mid-workflow.
 - Confirm before destructive actions (deleting environments, clearing sessions).
 - When a tool call fails, explain what failed in plain English and offer alternatives.
 - After every significant action, tell the analyst what changed and what they can
