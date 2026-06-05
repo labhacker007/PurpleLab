@@ -2,7 +2,7 @@
 set -e
 
 echo "Running Alembic migrations..."
-alembic upgrade head
+alembic upgrade heads
 
 echo "Starting application..."
 exec "$@"

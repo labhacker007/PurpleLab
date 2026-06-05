@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.core.schemas import ChatRequest, ChatChunk, StatusResponse
@@ -37,11 +37,15 @@ async def chat(request: ChatRequest):
 
     async def _stream():
         try:
+            # Merge goal into context so orchestrator can pass it to get_or_create
+            ctx = {**request.context}
+            if request.goal:
+                ctx["goal"] = request.goal
             async for chunk in orchestrator.run(
                 message=request.message,
                 conversation_id=request.conversation_id,
                 environment_id=request.environment_id,
-                context=request.context,
+                context=ctx,
             ):
                 sse_chunk = ChatChunk(
                     type=chunk.get("type", "text"),
@@ -85,6 +89,23 @@ async def get_conversation(conversation_id: str):
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
+
+
+@router.patch("/conversations/{conversation_id}")
+async def update_conversation(conversation_id: str, body: dict = Body(...)):
+    """Update conversation title or goal."""
+    orchestrator = get_orchestrator()
+    conv = await orchestrator.conversation_manager.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    title = body.get("title")
+    goal = body.get("goal")
+    ctx = body.get("context_state")
+    if ctx:
+        await orchestrator.conversation_manager.update_context(conversation_id, ctx, goal=goal, title=title)
+    elif title or goal:
+        await orchestrator.conversation_manager.update_context(conversation_id, {}, goal=goal, title=title)
+    return {"status": "ok", "id": conversation_id}
 
 
 @router.delete("/conversations/{conversation_id}")

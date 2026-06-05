@@ -20,6 +20,7 @@ import {
   EyeOff,
   Pencil,
   X,
+  Gauge,
 } from 'lucide-react'
 import { apiGet, apiPut } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
@@ -74,7 +75,7 @@ interface SkillPrompt {
   has_custom_prompt: boolean
 }
 
-type Tab = 'functions' | 'guardrails' | 'usage' | 'skills'
+type Tab = 'functions' | 'chat_limits' | 'guardrails' | 'usage' | 'skills'
 
 // ─── Provider / model catalogue ─────────────────────────────────────────────
 
@@ -364,6 +365,197 @@ function FunctionsTab() {
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+// ─── Chat Limits Tab ─────────────────────────────────────────────────────────
+
+function ChatLimitsTab() {
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [form, setForm] = useState({
+    max_input_tokens: 18000,
+    max_output_tokens: 4096,
+    rate_limit_per_minute: 30,
+    enabled: true,
+  })
+  const [funcCfg, setFuncCfg] = useState<{ provider: string; model_id: string; temperature: number; max_tokens: number } | null>(null)
+  const [funcMaxTokens, setFuncMaxTokens] = useState(4096)
+  const [savingFunc, setSavingFunc] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [guardrail, fnList] = await Promise.all([
+        apiGet<{ max_input_tokens: number; max_output_tokens: number; rate_limit_per_minute: number; enabled: boolean }>('/api/v2/ai-engine/guardrails/AGENT_CHAT'),
+        apiGet<{ functions: LLMFunctionConfig[] }>('/api/v2/ai-engine/functions'),
+      ])
+      setForm({
+        max_input_tokens: guardrail.max_input_tokens ?? 18000,
+        max_output_tokens: guardrail.max_output_tokens ?? 4096,
+        rate_limit_per_minute: guardrail.rate_limit_per_minute ?? 30,
+        enabled: guardrail.enabled ?? true,
+      })
+      const chatFn = (fnList.functions ?? []).find(f => f.function_name === 'AGENT_CHAT')
+      if (chatFn) {
+        setFuncCfg(chatFn.config)
+        setFuncMaxTokens(chatFn.config.max_tokens)
+      }
+    } catch { /* silent */ }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function saveGuardrail() {
+    setSaving(true)
+    setMsg('')
+    try {
+      await apiPut('/api/v2/ai-engine/guardrails/AGENT_CHAT', {
+        ...form,
+        block_patterns: [],
+        require_json_output: false,
+        pii_masking_enabled: false,
+        system_prompt_override: null,
+        notes: 'Chat rate limits configured by admin',
+      })
+      setMsg('Saved ✓')
+      setTimeout(() => setMsg(''), 2000)
+    } catch (e: unknown) {
+      setMsg(`Error: ${e instanceof Error ? e.message : 'Failed'}`)
+    } finally { setSaving(false) }
+  }
+
+  async function saveFuncMaxTokens() {
+    if (!funcCfg) return
+    setSavingFunc(true)
+    try {
+      await apiPut('/api/v2/ai-engine/functions/AGENT_CHAT', {
+        provider: funcCfg.provider,
+        model_id: funcCfg.model_id,
+        temperature: funcCfg.temperature,
+        max_tokens: funcMaxTokens,
+        base_url: '',
+        api_key_override: '',
+      })
+      setFuncCfg(c => c ? { ...c, max_tokens: funcMaxTokens } : c)
+      setMsg('Max output tokens saved ✓')
+      setTimeout(() => setMsg(''), 2000)
+    } catch (e: unknown) {
+      setMsg(`Error saving max tokens: ${e instanceof Error ? e.message : 'Failed'}`)
+    } finally { setSavingFunc(false) }
+  }
+
+  if (loading) return (
+    <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
+      <RefreshCw className="w-4 h-4 animate-spin" />
+      <span className="text-sm">Loading chat limits...</span>
+    </div>
+  )
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Context Window Budget</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Controls how much conversation history is sent to the model per turn.
+            Lower values reduce token usage and prevent 429 rate limit errors.
+          </p>
+        </div>
+        <label className="block space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground">History token budget</span>
+            <span className="font-mono text-xs text-primary">{fmtNumber(form.max_input_tokens)} tokens</span>
+          </div>
+          <input
+            type="range" min={4000} max={100000} step={1000}
+            value={form.max_input_tokens}
+            onChange={e => setForm(f => ({ ...f, max_input_tokens: +e.target.value }))}
+            className="w-full accent-primary"
+          />
+          <div className="flex justify-between text-[10px] text-muted-foreground">
+            <span>4K (minimal)</span>
+            <span>18K (default)</span>
+            <span>100K (full history)</span>
+          </div>
+        </label>
+        <p className="text-[11px] text-amber-400/80 bg-amber-500/5 border border-amber-500/20 rounded px-2.5 py-1.5">
+          The Anthropic rate limit is 30,000 input tokens/minute. With tools (~8K) + system prompt (~2K),
+          keep history budget ≤ 18,000 to avoid 429 errors on active conversations.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Output & Rate Limits</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Per-request output size and API call rate.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <label className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">Max output tokens / request</span>
+              <span className="font-mono text-xs text-primary">{fmtNumber(funcMaxTokens)}</span>
+            </div>
+            <input
+              type="range" min={256} max={16384} step={256}
+              value={funcMaxTokens}
+              onChange={e => setFuncMaxTokens(+e.target.value)}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>256</span><span>4K</span><span>16K</span>
+            </div>
+            <button
+              onClick={saveFuncMaxTokens}
+              disabled={savingFunc}
+              className="mt-1 flex items-center gap-1.5 rounded border border-border bg-muted/40 hover:bg-muted px-2.5 py-1 text-xs text-foreground transition-colors disabled:opacity-50"
+            >
+              {savingFunc ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+              Save
+            </button>
+          </label>
+          <label className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">Max API calls / minute</span>
+              <span className="font-mono text-xs text-primary">{form.rate_limit_per_minute}</span>
+            </div>
+            <input
+              type="range" min={1} max={120} step={1}
+              value={form.rate_limit_per_minute}
+              onChange={e => setForm(f => ({ ...f, rate_limit_per_minute: +e.target.value }))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>1</span><span>30</span><span>120</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={saveGuardrail}
+          disabled={saving}
+          className="flex items-center gap-1.5 rounded bg-primary px-4 py-2 text-xs text-white hover:bg-primary/90 disabled:opacity-50"
+        >
+          {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+          Save Chat Limits
+        </button>
+        {msg && <span className={cn('text-xs', msg.startsWith('Error') ? 'text-red-400' : 'text-green-400')}>{msg}</span>}
+      </div>
+
+      <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+        <h4 className="text-xs font-medium text-foreground">How these settings work</h4>
+        <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+          <li><strong className="text-foreground">History budget</strong> — oldest messages are dropped when the conversation exceeds this size. Does not truncate in-progress responses.</li>
+          <li><strong className="text-foreground">Max output tokens</strong> — the model stops generating after this many tokens in a single response.</li>
+          <li><strong className="text-foreground">Rate limit</strong> — enforced server-side; requests over the limit receive a 429 response immediately.</li>
+          <li>The orchestrator auto-retries 429 errors up to 3× with exponential backoff (2s, 4s, 8s).</li>
+        </ul>
+      </div>
     </div>
   )
 }
@@ -730,6 +922,7 @@ function SkillsTab() {
 
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: 'functions', label: 'Functions', icon: Brain },
+  { key: 'chat_limits', label: 'Chat Limits', icon: Gauge },
   { key: 'guardrails', label: 'Guardrails', icon: Shield },
   { key: 'usage', label: 'Usage & Cost', icon: BarChart3 },
   { key: 'skills', label: 'Skill Prompts', icon: Code2 },
@@ -774,6 +967,7 @@ export default function AIEnginePage() {
 
       <div>
         {tab === 'functions' && <FunctionsTab />}
+        {tab === 'chat_limits' && <ChatLimitsTab />}
         {tab === 'guardrails' && <GuardrailsTab />}
         {tab === 'usage' && <UsageTab />}
         {tab === 'skills' && <SkillsTab />}

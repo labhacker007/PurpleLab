@@ -20,6 +20,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Drawer } from '@/components/ui/Drawer'
 import { apiGet, apiPost, apiDelete } from '@/lib/api/client'
+import { AskAboutThis } from '@/components/AskAboutThis'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1118,6 +1119,12 @@ export default function UseCasesPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <AskAboutThis
+              goal="detection_validation"
+              message="Show me my detection use cases. Which ones are failing? Help me find and fix the coverage gaps."
+              label="Ask AI"
+              size="md"
+            />
             <button
               onClick={() => void loadUseCases()}
               className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"

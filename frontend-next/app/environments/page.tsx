@@ -14,6 +14,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { authFetch } from '@/lib/auth'
 import { cn } from '@/lib/utils'
+import { AskAboutThis } from '@/components/AskAboutThis'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -310,6 +311,12 @@ export default function EnvironmentsPage() {
                           <ExternalLink className="h-3.5 w-3.5" /> Open Canvas
                         </Button>
                       </Link>
+                      <AskAboutThis
+                        goal="red_team"
+                        envId={env.id}
+                        envName={env.name}
+                        message={`Help me run a red team exercise in the "${env.name}" environment.`}
+                      />
                     </div>
                   </CardContent>
                 </Card>

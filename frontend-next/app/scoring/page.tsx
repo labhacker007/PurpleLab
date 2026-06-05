@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { authFetch } from '@/lib/auth'
 import { API_BASE } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { AskAboutThis } from '@/components/AskAboutThis'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -616,6 +617,12 @@ export default function ScoringPage() {
               {snapshotMsg}
             </span>
           )}
+          <AskAboutThis
+            goal="coverage"
+            message="Show me my current DES and IHDS scores, analyse the biggest coverage gaps, and give me a prioritised plan to improve detection coverage."
+            label="Ask AI about coverage"
+            size="md"
+          />
           <Button size="sm" onClick={handleSnapshot} disabled={snapshotting}>
             <Camera className={cn('h-3.5 w-3.5', snapshotting && 'animate-pulse')} />
             Take Snapshot

@@ -51,6 +51,9 @@ class Conversation(Base):
     environment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("environments.id"), nullable=True
     )
+    # Sticky context: persists across turns so the agent knows where it is
+    goal: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    context_state: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
 

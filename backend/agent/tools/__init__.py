@@ -24,6 +24,9 @@ def register_all_tools(registry: ToolRegistry) -> None:
     from backend.agent.tools import simulation_tools
     from backend.agent.tools import sigma_tools
     from backend.agent.tools import hitl_tools
+    from backend.agent.tools import platform_tools
+    from backend.agent.tools import mcp_bridge
+    from backend.agent.tools import context_tools
 
     threat_intel_tools.register_tools(registry)
     rule_tools.register_tools(registry)
@@ -33,3 +36,9 @@ def register_all_tools(registry: ToolRegistry) -> None:
     simulation_tools.register_tools(registry)
     sigma_tools.register_tools(registry)
     hitl_tools.register_tools(registry)
+    # Platform tools: UI-level capabilities (environments, scenarios, use-cases, scoring, etc.)
+    platform_tools.register_tools(registry)
+    # MCP bridge: picks up all remaining MCP tools not covered natively above
+    mcp_bridge.register_tools(registry)
+    # Context tools: agent-driven sticky context + suggested followups
+    context_tools.register_tools(registry)

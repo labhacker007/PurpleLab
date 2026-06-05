@@ -18,6 +18,11 @@ from backend.api.vendor.defender import router as defender_router
 from backend.api.vendor.qradar import router as qradar_router
 from backend.api.vendor.xsiam import router as xsiam_router
 from backend.api.vendor.carbonblack import router as carbonblack_router
+from backend.api.vendor.okta import router as okta_router
+from backend.api.vendor.entra_id import router as entra_router
+from backend.api.vendor.elastic import router as elastic_router
+from backend.api.vendor.sentinelone import router as sentinelone_router
+from backend.api.vendor.panorama import router as panorama_router
 from backend.api.v2.sim_siem import router as sim_siem_router
 from backend.api.v2.tabletop import router as tabletop_router
 
@@ -69,6 +74,11 @@ app.include_router(defender_router)
 app.include_router(qradar_router)
 app.include_router(xsiam_router)
 app.include_router(carbonblack_router)
+app.include_router(okta_router)
+app.include_router(entra_router)
+app.include_router(elastic_router)
+app.include_router(sentinelone_router)
+app.include_router(panorama_router)
 
 # Simulation SIEM + Tabletop
 app.include_router(sim_siem_router)

@@ -22,6 +22,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui
 import { authFetch } from '@/lib/auth'
 import { API_BASE } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { AskAboutThis } from '@/components/AskAboutThis'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -419,16 +420,23 @@ export default function SessionsPage() {
                         {durationStr(s.created_at, s.status !== 'running' ? s.updated_at : null)}
                       </td>
                       <td className="px-5 py-3 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            router.push(`/sessions/${s.id}`)
-                          }}
-                          className="inline-flex items-center gap-1 text-muted hover:text-primary transition-colors"
-                        >
-                          <Play className="h-3 w-3" />
-                          <ArrowRight className="h-3 w-3" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <AskAboutThis
+                            goal="detection_validation"
+                            sessionId={s.id}
+                            message={`Analyse the results of session ${s.id} and tell me which detection rules fired, which gaps were found, and what to fix.`}
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              router.push(`/sessions/${s.id}`)
+                            }}
+                            className="inline-flex items-center gap-1 text-muted hover:text-primary transition-colors"
+                          >
+                            <Play className="h-3 w-3" />
+                            <ArrowRight className="h-3 w-3" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

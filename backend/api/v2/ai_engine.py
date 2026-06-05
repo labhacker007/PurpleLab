@@ -169,12 +169,14 @@ def _guardrail_to_dict(row: AIGuardrailConfig) -> dict[str, Any]:
 
 def _default_guardrail_dict(function_name: str) -> dict[str, Any]:
     meta = FUNCTION_METADATA.get(function_name, {})
+    # Agent chat uses a lower context budget to stay within 30K TPM limits
+    default_input = 18_000 if function_name == "AGENT_CHAT" else 32_000
     return {
         "id": None,
         "function_name": function_name,
         "display_name": meta.get("display_name", function_name),
         "enabled": True,
-        "max_input_tokens": 32000,
+        "max_input_tokens": default_input,
         "max_output_tokens": 8192,
         "rate_limit_per_minute": 60,
         "block_patterns": [],
@@ -498,6 +500,29 @@ async def update_guardrail(
             await session.commit()
             await session.refresh(row)
             return _guardrail_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# GET /ai-engine/guardrails/{function_name}
+# ---------------------------------------------------------------------------
+
+@router.get("/guardrails/{function_name}")
+async def get_guardrail(
+    function_name: str,
+    current_user: Any = Depends(require_role("admin", "engineer", "analyst")),
+) -> dict[str, Any]:
+    """Get guardrail config for a specific function."""
+    try:
+        LLMFunction(function_name)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown function: {function_name}")
+    async with async_session() as session:
+        row = await session.scalar(
+            select(AIGuardrailConfig).where(AIGuardrailConfig.function_name == function_name)
+        )
+    if row:
+        return _guardrail_to_dict(row)
+    return _default_guardrail_dict(function_name)
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ The agentic loop adapts its API call format to match the active provider.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import traceback
@@ -19,7 +20,12 @@ from typing import Any, AsyncIterator, Optional
 
 log = logging.getLogger(__name__)
 
-_MAX_TOOL_ROUNDS = 15
+_MAX_TOOL_ROUNDS = 10
+# Keep conversation history under this many tokens to stay within TPM limits
+_HISTORY_TOKEN_BUDGET = 18_000
+# 429 retry config
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2.0
 
 
 class AgentOrchestrator:
@@ -31,6 +37,36 @@ class AgentOrchestrator:
         self.tool_registry = ToolRegistry()
         self.conversation_manager = ConversationManager()
         self._register_tools()
+        self._guardrail_cache: dict[str, Any] = {}
+        self._guardrail_cache_ts: float = 0.0
+
+    async def _get_chat_guardrail(self) -> dict[str, Any]:
+        """Return the AGENT_CHAT guardrail config, cached for 5 minutes."""
+        import time
+        now = time.monotonic()
+        if now - self._guardrail_cache_ts < 300 and self._guardrail_cache:
+            return self._guardrail_cache
+        try:
+            from backend.db.session import async_session
+            from backend.db.models import AIGuardrailConfig
+            from sqlalchemy import select as sa_select
+            async with async_session() as db:
+                row = await db.scalar(
+                    sa_select(AIGuardrailConfig).where(
+                        AIGuardrailConfig.function_name == "AGENT_CHAT"
+                    )
+                )
+            if row:
+                self._guardrail_cache = {
+                    "max_input_tokens": row.max_input_tokens,
+                    "max_output_tokens": row.max_output_tokens,
+                    "rate_limit_per_minute": row.rate_limit_per_minute,
+                    "enabled": row.enabled,
+                }
+        except Exception as e:
+            log.debug("guardrail_cache_miss: %s", e)
+        self._guardrail_cache_ts = now
+        return self._guardrail_cache
 
     def _register_tools(self) -> None:
         try:
@@ -65,23 +101,42 @@ class AgentOrchestrator:
             router = get_router()
             cfg = await router.get_config_async(LLMFunction.AGENT_CHAT)
 
-            conv_id = await self.conversation_manager.get_or_create(conversation_id)
+            # Load sticky context to seed get_or_create with existing goal
+            goal_hint = context.get("goal")
+            conv_id = await self.conversation_manager.get_or_create(
+                conversation_id, goal=goal_hint
+            )
             yield {"type": "conversation_id", "content": conv_id, "metadata": {}}
 
             await self.conversation_manager.add_message(conv_id, "user", message)
-            await self.conversation_manager.trim_to_budget(conv_id)
+            # Use admin-configured context budget (falls back to class default)
+            guardrail = await self._get_chat_guardrail()
+            history_budget = guardrail.get("max_input_tokens") or _HISTORY_TOKEN_BUDGET
+            await self.conversation_manager.trim_to_budget(conv_id, budget=history_budget)
 
-            env_context = context.get("environment", None)
-            if environment_id:
-                env_context = env_context or f"Environment ID: {environment_id}"
-            # For OpenAI-compat providers (including Ollama), tools are passed via API
-            # params, not in the system prompt — keeps prompt small for local models.
-            include_tools_in_prompt = cfg.provider == LLMProvider.ANTHROPIC
+            # Load sticky context for this conversation
+            sticky = await self.conversation_manager.get_context(conv_id)
+            # Merge request-level context over sticky (request wins)
+            merged_context = {**sticky, **context}
+
+            env_context = merged_context.get("environment")
+            if not env_context and environment_id:
+                env_context = f"Environment ID: {environment_id}"
+            elif not env_context and merged_context.get("environment_name"):
+                env_context = merged_context["environment_name"]
+
             system_prompt = build_system_prompt(
                 environment_context=env_context,
-                available_tools=self.tool_registry.list_tools() if include_tools_in_prompt else None,
-                rag_context=context.get("rag_context", None),
+                rag_context=merged_context.get("rag_context"),
+                context_state=sticky,
             )
+
+            # Set ContextVar so save_context tool can access conv_id + manager
+            try:
+                from backend.agent.tools.context_tools import set_conversation_context
+                set_conversation_context(conv_id, self.conversation_manager)
+            except Exception:
+                pass
 
             # Route to correct provider loop
             if cfg.provider == LLMProvider.ANTHROPIC:
@@ -91,6 +146,11 @@ class AgentOrchestrator:
 
             async for event in gen:
                 yield event
+
+            # Emit the updated sticky context so the frontend can refresh the context bar
+            updated_ctx = await self.conversation_manager.get_context(conv_id)
+            if updated_ctx:
+                yield {"type": "context_state", "content": "", "metadata": updated_ctx}
 
         except Exception as exc:
             log.error("orchestrator_error: %s", exc, exc_info=True)
@@ -119,18 +179,35 @@ class AgentOrchestrator:
         api_messages = await self.conversation_manager.get_anthropic_messages(conv_id)
 
         for _round in range(_MAX_TOOL_ROUNDS):
-            try:
-                response = await client.messages.create(
-                    model=cfg.model_id,
-                    max_tokens=cfg.max_tokens,
-                    temperature=cfg.temperature,
-                    system=system_prompt,
-                    messages=api_messages,
-                    tools=tools if tools else [],
-                )
-            except Exception as api_err:
-                log.error("anthropic_api_error: %s", api_err, exc_info=True)
-                yield {"type": "error", "content": f"LLM API error: {api_err}", "metadata": {}}
+            response = None
+            last_err: Exception | None = None
+            for _attempt in range(_MAX_RETRIES + 1):
+                try:
+                    response = await client.messages.create(
+                        model=cfg.model_id,
+                        max_tokens=cfg.max_tokens,
+                        temperature=cfg.temperature,
+                        system=system_prompt,
+                        messages=api_messages,
+                        tools=tools if tools else [],
+                    )
+                    break
+                except Exception as api_err:
+                    err_str = str(api_err)
+                    last_err = api_err
+                    is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower()
+                    is_overload = "overloaded" in err_str.lower() or "529" in err_str
+                    if (is_rate_limit or is_overload) and _attempt < _MAX_RETRIES:
+                        wait = _RETRY_BASE_DELAY * (2 ** _attempt)
+                        log.warning("anthropic_rate_limit attempt=%d waiting=%.1fs", _attempt + 1, wait)
+                        yield {"type": "text", "content": f"\n*Rate limited — retrying in {int(wait)}s...*\n", "metadata": {}}
+                        await asyncio.sleep(wait)
+                        continue
+                    log.error("anthropic_api_error: %s", api_err, exc_info=True)
+                    yield {"type": "error", "content": f"LLM API error: {api_err}", "metadata": {}}
+                    return
+            if response is None:
+                yield {"type": "error", "content": f"LLM API error after retries: {last_err}", "metadata": {}}
                 return
 
             text_parts: list[str] = []
@@ -163,7 +240,7 @@ class AgentOrchestrator:
                 assistant_content.append({"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]})
             api_messages.append({"role": "assistant", "content": assistant_content})
 
-            tool_result_blocks = await self._execute_tools(tool_use_blocks)
+            tool_result_blocks = await self._execute_tools(tool_use_blocks, conv_id=conv_id)
             for tr in tool_result_blocks:
                 yield {
                     "type": "tool_result",
@@ -334,12 +411,24 @@ class AgentOrchestrator:
     # ── Tool execution ──────────────────────────────────────────────────────
 
     async def _execute_tools(
-        self, tool_use_blocks: list[dict[str, Any]]
+        self,
+        tool_use_blocks: list[dict[str, Any]],
+        conv_id: str | None = None,
     ) -> list[dict[str, Any]]:
         results = []
         for tc in tool_use_blocks:
             try:
                 result = await self.tool_registry.execute(tc["name"], tc["input"])
+                # Auto-extract context patch if the tool returns one
+                if conv_id and isinstance(result, dict):
+                    patch = result.pop("_context_patch", None)
+                    if patch:
+                        await self.conversation_manager.update_context(conv_id, patch)
+                    else:
+                        # Auto-detect well-known fields even without explicit _context_patch
+                        inferred = _infer_context_patch(tc["name"], result)
+                        if inferred:
+                            await self.conversation_manager.update_context(conv_id, inferred)
                 result_str = json.dumps(result, default=str) if not isinstance(result, str) else result
             except KeyError:
                 result_str = f"Error: Tool '{tc['name']}' not registered."
@@ -351,6 +440,56 @@ class AgentOrchestrator:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _infer_context_patch(tool_name: str, result: dict[str, Any]) -> dict[str, Any] | None:
+    """Infer context_state updates from tool results without explicit _context_patch.
+
+    Keeps the agent's context bar up to date automatically as it uses tools.
+    """
+    if result.get("status") != "success":
+        return None
+    data = result.get("data", result)
+    patch: dict[str, Any] = {}
+
+    # Environment tools
+    if tool_name in ("create_environment", "get_environment", "configure_environment"):
+        if data.get("id"):
+            patch["environment_id"] = str(data["id"])
+        if data.get("name"):
+            patch["environment_name"] = data["name"]
+
+    # Session tools
+    if tool_name in ("get_session", "run_scenario"):
+        sid = data.get("id") or data.get("session_id")
+        if sid:
+            patch["active_session_id"] = str(sid)
+            patch.setdefault("working_set", {})
+            patch["working_set"]["session_ids"] = [str(sid)]
+
+    # Sigma / rule tools
+    if tool_name in ("import_sigma_rule", "search_sigma_library"):
+        rule_ids = []
+        if isinstance(data, list):
+            rule_ids = [str(r.get("id")) for r in data if r.get("id")]
+        elif data.get("id"):
+            rule_ids = [str(data["id"])]
+        if rule_ids:
+            patch.setdefault("working_set", {})
+            patch["working_set"]["rule_ids"] = rule_ids
+
+    # Use-case tools
+    if tool_name in ("create_use_case", "run_use_case", "get_use_case_coverage"):
+        uc_id = data.get("id")
+        if uc_id:
+            patch.setdefault("working_set", {})
+            patch["working_set"]["use_case_ids"] = [str(uc_id)]
+
+    # Track last tool used
+    if patch or tool_name:
+        patch["last_tool"] = tool_name
+
+    return patch if patch else None
+
 
 def _tools_to_openai_format(anthropic_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert Anthropic tool definitions to OpenAI function_calling format."""

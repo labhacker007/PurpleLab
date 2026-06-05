@@ -41,6 +41,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     environment_id: Optional[str] = None
+    goal: Optional[str] = None  # analyst preset: red_team/detection_validation/tabletop/coverage/free
     context: dict[str, Any] = Field(default_factory=dict)
 
 
