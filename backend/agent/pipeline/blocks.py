@@ -282,8 +282,12 @@ async def _blk_get_gap_analysis(**_) -> dict:
     }
 
 
-async def _blk_import_sigma_rules(technique_id: str = "", search: str = "", limit: int = 5, **_) -> dict:
+async def _blk_import_sigma_rules(technique_id=None, search: str = "", limit: int = 5, **_) -> dict:
     import httpx
+    # Accept single string or array of technique IDs (from {{gaps.top_gap_techniques}})
+    if isinstance(technique_id, list):
+        technique_id = technique_id[0] if technique_id else ""
+    technique_id = technique_id or ""
     params: dict = {"limit": limit}
     if technique_id:
         params["technique_id"] = technique_id
@@ -479,7 +483,7 @@ _reg(
     "import_sigma_rules", "detection", "Import Sigma Rules",
     "Find Sigma rules from the library matching a technique ID or search query.",
     inputs={
-        "technique_id": {"type": "string",  "required": False, "description": "MITRE technique ID e.g. T1059.001"},
+        "technique_id": {"type": "array",   "required": False, "description": "MITRE technique ID(s) — string or array e.g. ['T1059']"},
         "search":       {"type": "string",  "required": False, "description": "Keyword search"},
         "limit":        {"type": "integer", "required": False, "description": "Max results; default 5"},
     },
