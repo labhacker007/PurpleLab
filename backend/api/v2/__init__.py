@@ -39,6 +39,7 @@ from backend.api.v2.sigma_library import router as sigma_library_router
 from backend.api.v2.normalization import router as normalization_router
 from backend.api.v2.ai_engine import router as ai_engine_router
 from backend.api.v2.scenarios import router as scenarios_router
+from backend.api.v2.itdr import router as itdr_router
 
 v2_router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -111,3 +112,5 @@ v2_router.include_router(normalization_router)
 v2_router.include_router(ai_engine_router)
 # Simulation Library — scenarios + TTP templates
 v2_router.include_router(scenarios_router)
+# ITDR — Identity Threat Detection & Response simulation scenarios
+v2_router.include_router(itdr_router)
