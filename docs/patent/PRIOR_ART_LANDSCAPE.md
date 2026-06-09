@@ -95,15 +95,16 @@
 
 ---
 
-### FireCompass — Continuous Automated Red Teaming (2023)
+### FireCompass — Continuous Automated Red Teaming (2021–2023)
 
-| Patent | Status | Core Claim |
-|--------|--------|-----------|
-| Undisclosed number | Granted 2023 | Frontier-driven attack graph traversal; distributed self-launching subsystems; adaptive learning from emulation results |
+| Patent | Filed | Status | Core Claim |
+|--------|-------|--------|-----------|
+| US20210352100A1 | May 2021 | Published (pending/granted) | Frontier-driven attack graph traversal; RL-based adaptive learning from emulation outcomes; distributed self-launching subsystems; "attack frontiers" for scalable red teaming without full graph generation |
 
-**Coverage:** Automated red teaming with frontier-driven graph traversal (avoid full graph generation).  
-**Does NOT cover:** Detection effectiveness scoring, simulation-driven gap closure, AI pipeline composition, threat intel integration.  
-**Risk to PurpleLab:** None for PL-P1, PL-P2, PL-P3.
+**Coverage:** RL-based penetration test path optimization — finds new network attack paths by adapting simulation strategy from prior run outcomes.  
+**Does NOT cover:** ATT&CK technique-keyed coverage states (UNCOVERED/PARTIAL/COVERED), risk-weighted technique selection formula, detection rule validation via simulation, Sigma rule generation, coverage-gated dispatch.  
+**Risk to PurpleLab:** LOW-MODERATE for PL-P1 — examiner may attempt to combine FireCompass (closed loop from simulation outcomes) with CardinalOps (ATT&CK technique tracking). Counter-argument: neither teaches nor suggests using simulation outcomes to update a per-ATT&CK-technique state machine keyed to detection rule validation, nor the risk-weighted dispatch formula with frequency × severity × time-weight components.  
+**Risk for PL-P2, PL-P3:** None.
 
 ---
 
@@ -141,15 +142,22 @@ In October 2025, Picus announced AI-powered BAS using multi-agent orchestration 
 
 ## 3. Academic Prior Art
 
-### Direct Papers
+### Direct Papers — Updated June 2026
 
-| Paper | Published | Relevance | Gap |
-|-------|-----------|-----------|-----|
-| "Scalable and Automated Evaluation of Blue Team Cyber Posture in Cyber Ranges" (arXiv:2312.17221) | Dec 2023 | Automates blue team posture evaluation in cyber range exercises | Focused on exercise reporting, not production detection stack measurement; no DES-type composite score |
-| "SoK: The MITRE ATT&CK Framework in Research and Practice" (arXiv:2304.07411) | Apr 2023 | Systematizes 417 ATT&CK publications | Explicitly identifies automated detection effectiveness scoring as a *research gap*. This paper supports PurpleLab novelty. |
-| "MITRE ATT&CK Applications in Cybersecurity and The Way Forward" (arXiv:2502.10825) | Feb 2025 | Surveys 417 papers on ATT&CK use | Does not describe automated simulation-to-detection feedback loops |
-| "Architecting Resilient LLM Agents: Plan-then-Execute" (arXiv:2509.08646) | 2025 | Plan-then-execute LLM pattern | General paradigm; does not apply to security simulation domain; does not describe typed block DAGs or zero-execution LLM calls |
-| "ADAPT: Game-Theoretic Framework for Automated Penetration Testing" (arXiv:2411.00217) | Oct 2024 | Game-theoretic purple team defense modeling | No pipeline composition, no detection coverage scoring, no feedback loop |
+| Paper | Published | Relevant To | What It Covers | What It Misses (PurpleLab's Novelty) |
+|-------|-----------|------------|---------------|---------------------------------------|
+| "SoK: MITRE ATT&CK in Research" (arXiv:2304.07411) | Apr 2023 | PL-P1, PL-P2 | Surveys 417 ATT&CK papers; **explicitly identifies automated detection effectiveness scoring as a research gap** — supports PurpleLab novelty claim | Does not describe automated scoring, simulation dispatch, or feedback loops |
+| "Scalable Blue Team Evaluation" (arXiv:2312.17221) | Dec 2023 | PL-P1 | Automates posture evaluation in cyber range exercises | Focused on exercise reporting, not production detection stack; no simulation-driven coverage state machine |
+| "MITRE ATT&CK Applications" (arXiv:2502.10825) | Feb 2025 | PL-P1 | Surveys ATT&CK use cases | Does not describe automated simulation-to-detection feedback loops |
+| **"LLMCloudHunter"** (arXiv:2407.05194) | Jul 2024 | PL-P2 | LLM generates cloud detection rules (Splunk) from CTI; 92% precision | No coverage check; no simulation dispatch; no simulation-log grounding; no use case creation |
+| **"IntelEX"** (arXiv:2412.10872) | Dec 2024 | **PL-P2 (critical)** | Extracts TTPs from CTI; generates Sigma rules via LLM with ICL; partial validation against pre-collected logs; 0.902 F1 on technique ID | **No coverage gate** (dispatches for all TTPs regardless of existing coverage); no live simulation dispatch; no coverage store update — stages 1+4+partial 5 only |
+| "SigmaGen" (night-wolf.io) | Jul 2025 | PL-P2 | Fine-tuned LLM for Sigma rule generation from TI feeds | No coverage gate; no live re-simulation validation confirmed; no coverage store |
+| "Bridging the Gap — LLM Agents to Sigma" (Giulia C., Medium) | Oct 2025 | PL-P2 | 4-version multi-agent Sigma generation pipeline | No coverage gate; no simulation dispatch; validation deferred to future work |
+| "Architecting Resilient LLM Agents: Plan-then-Execute" (arXiv:2509.08646) | Sep 2025 | **PL-P3 (critical)** | Explicitly advocates plan-then-execute for security; DAG-based task dependency declarations | General principle only; no typed block port schemas; no `{{step_id.output_key}}` inter-step data chaining; no type-preserving template resolution; not a simulation composition system |
+| "Prompt2DAG" (arXiv:2509.13487) | 2025 | PL-P3 | LLM-based pipeline DAG generation; Apache Airflow execution | Multi-stage LLM calls (not single-round); generic data enrichment domain (not security simulation); no typed block vocabulary; no type-preserving template chaining |
+| "RulePilot" (arXiv:2511.12224) | Nov 2025 | PL-P2 | LLM converts NL descriptions to detection rules via IR + CoT | NL-to-rule only (no TI pipeline); no simulation dispatch; no coverage gate |
+| **"CTI-REALM"** (arXiv:2603.13517, Microsoft Security AI) | **Mar 2026** | **PL-P2 (critical)** | Benchmark framework: CTI→TTP extraction→telemetry exploration→Sigma/KQL generation→validation against pre-recorded logs; scores agents at each checkpoint | **Benchmark only (not operational platform)**; uses 37 pre-recorded telemetry samples; **no coverage gate**; no live simulation dispatch conditioned on coverage gaps; no coverage store update — stages 1+4+5 only |
+| "ADAPT: Game-Theoretic Automated Pentest" (arXiv:2411.00217) | Oct 2024 | — | Game-theoretic purple team modeling | No pipeline composition, detection coverage scoring, or feedback loop |
 
 ### MITRE ATT&CK Evaluations Scoring Specification
 
@@ -161,21 +169,29 @@ MITRE scores detection coverage per technique based on alert quality tiers, with
 
 ## 4. Freedom-to-Operate Summary
 
-| PurpleLab Feature | Blocking Prior Art? | Notes |
+| PurpleLab Feature | Blocking Prior Art? | Action |
 |---|---|---|
 | Gap-weighted simulation dispatch (closed loop) | **None found** | File PL-P1 |
-| Threat intel → detection validation pipeline | **None found** | File PL-P2; watch Picus |
-| Single-LLM-round composition / zero-LLM execution | **US12537846** (different architecture) | File PL-P3 with explicit distinction |
-| DES scoring formula | **US11973788** (different data source) | Defensive publication; file PL-P1 with formula |
-| IHDS composite formula | **None found** | Defensive publication |
-| Stateful simulation execution | **US11991203** (different context) | Do not claim intra-simulation branching |
-| Basic attack simulation execution | **US9892260, US20160044057** | Do not claim simulation execution mechanics |
-| Production-network simulation | **US10757131** | Do not claim distributed production-network simulation |
+| ATT&CK coverage state machine (3-state, simulation-validated) | **None found** | Core of PL-P1; distinguish CardinalOps (SIEM-layer only) |
+| Risk-weighted technique selection formula (freq × sev × time) | **None found** | File PL-P1 Claim 1(c) |
+| Closed-loop coverage state update from simulation outcomes | **US20210352100 FireCompass** (different domain/objective) | Distinguish explicitly — FireCompass uses RL for path traversal, not detection coverage |
+| Coverage-gated TI-to-detection pipeline | **None found** | The gate is the key novelty of PL-P2 |
+| Sigma rule generation FROM live simulation logs | **IntelEX Dec 2024** (pre-recorded, no gate) | Distinguish: IntelEX uses pre-collected logs; PL-P2 requires LIVE dispatch conditioned on coverage gap |
+| Single-LLM-round composition / zero-LLM execution | **US12537846** (LLM-in-loop, opposite architecture) | File PL-P3; explicitly reference and distinguish US12537846 |
+| Typed block registry + wave execution + type-preserving resolver | **None found** | New independent Claim 11–14 in PL-P3 |
+| General plan-then-execute pattern | **arXiv:2509.08646 Sep 2025** (general principle) | Do NOT claim general pattern; claim typed template chaining and typed block vocabulary specifically |
+| DES scoring formula (5-dim geometric mean from sim outcomes) | **US11973788** (different data source: vuln scan, not simulation) | Defensive publication; file PL-P1 with formula and geometric mean distinction |
+| IHDS multiplicative pipeline score | **None found** | Defensive publication on arXiv |
+| Wave-based parallel execution of typed simulation steps | **None found** (Airflow/Prefect are general-purpose) | File as Claim 11 in PL-P3; distinguish on typed block vocabulary + security simulation domain |
+| Stateful intra-simulation branching | **US11991203 Picus** (granted) | Do NOT claim intra-simulation branching; PL-P1 is inter-simulation (selection of NEXT simulation) |
+| Basic simulation execution mechanics | **US9892260, US20160044057** | Do NOT claim how simulations execute; claim what drives their selection and what is done with their outcomes |
+| Production-network simulation | **US10757131** | Do NOT claim distributed production-network simulation |
 
 ---
 
 ## 5. Sources
 
+**Patents:**
 - [SafeBreach US9892260 — Google Patents](https://patents.google.com/patent/US9892260B2/en)
 - [AttackIQ US20160044057 — USPTO Report](https://uspto.report/patent/app/20160044057)
 - [Mandiant/Google US10757131 — Google Patents](https://patents.google.com/patent/US10757131B2/en)
@@ -183,10 +199,36 @@ MITRE scores detection coverage per technique based on alert quality tiers, with
 - [Tenable US11973788 — USPTO PDF](https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11973788)
 - [Siege Technologies US10270798 — Google Patents](https://patents.google.com/patent/US10270798B2/en)
 - [US12537846 — Cybersecurity Engine with LLM, USPTO](https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/12537846)
+- [FireCompass US20210352100A1 — Google Patents](https://patents.google.com/patent/US20210352100A1/en)
+- [Zafran Security US12223062 — Google Patents](https://patents.google.com/patent/US12223062)
+
+**Commercial products:**
 - [FireCompass CART Patent Announcement](https://firecompass.com/firecompass-secures-upsto-patent-for-automated-red-teaming/)
-- [CardinalOps Detection Posture Management](https://cardinalops.com/eliminate-detection-coverage-gaps-with-automation-and-mitre-attck/)
+- [CardinalOps — Eliminate Coverage Gaps](https://cardinalops.com/eliminate-detection-coverage-gaps-with-automation-and-mitre-attck/)
+- [CardinalOps — Leveraging AI and ATT&CK](https://cardinalops.com/blog/leveraging-ai-automation-mitre-attack-eliminate-detection-coverage-gap/)
 - [Picus AI BAS Announcement (Oct 2025) — Help Net Security](https://www.helpnetsecurity.com/2025/10/14/picus-security-validation-platform-bas/)
+- [Picus + Recorded Future Intelligence-Led Validation (Jan 2026)](https://www.picussecurity.com/resource/blog/intelligence-led-validation-with-picus-and-recorded-future)
+- [AttackIQ AI Agents — Watchtower (Aug 2025)](https://www.attackiq.com/2025/08/12/ai-agents/)
+- [DeTT&CT GitHub](https://github.com/rabobank-cdc/DeTTECT)
+- [MITRE CALDERA GitHub](https://github.com/apache/caldera)
+
+**Academic papers (arXiv):**
 - [SoK: MITRE ATT&CK in Research — arXiv:2304.07411](https://arxiv.org/pdf/2304.07411)
 - [Scalable Blue Team Evaluation — arXiv:2312.17221](https://arxiv.org/html/2312.17221)
+- [LLMCloudHunter — arXiv:2407.05194](https://arxiv.org/abs/2407.05194)
+- [IntelEX — arXiv:2412.10872](https://arxiv.org/html/2412.10872v1)
 - [Resilient LLM Agents Plan-then-Execute — arXiv:2509.08646](https://arxiv.org/pdf/2509.08646)
+- [Prompt2DAG — arXiv:2509.13487](https://arxiv.org/html/2509.13487v1)
+- [Evaluating LLM Detection Rules — arXiv:2509.16749](https://arxiv.org/abs/2509.16749)
+- [ADAPT Game-Theoretic Pentest — arXiv:2411.00217](https://arxiv.org/abs/2411.00217)
+- [RulePilot — arXiv:2511.12224](https://arxiv.org/abs/2511.12224)
+- [CTI-REALM — arXiv:2603.13517](https://arxiv.org/html/2603.13517v1)
+- [MITRE ATT&CK Applications — arXiv:2502.10825](https://arxiv.org/abs/2502.10825)
+
+**Other:**
 - [SafeBreach BAS Patents — IPWatchdog](https://ipwatchdog.com/2018/06/18/safebreach-issuance-breach-attack-simulation-patents/id=98340/)
+- [SigmaGen — Night-Wolf.io (Jul 2025)](https://blogs.night-wolf.io/sigmagen-ai-powered-attck-mapped-threat-detection-with-sigma-rules)
+- [CTI-REALM — Microsoft Security Blog (Mar 2026)](https://www.microsoft.com/en-us/security/blog/2026/03/20/cti-realm-a-new-benchmark-for-end-to-end-detection-rule-generation-with-ai-agents/)
+- [Giulia C. — LLM Agents for Sigma Detections (Oct 2025)](https://medium.com/@kawngc/bridging-the-gap-how-i-used-llm-agents-to-translate-threat-intelligence-into-sigma-detections-9537e7b49cb3)
+
+*Research completed: June 9, 2026. 30+ sources verified.*

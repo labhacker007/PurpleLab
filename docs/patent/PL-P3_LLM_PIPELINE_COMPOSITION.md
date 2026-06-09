@@ -44,6 +44,8 @@ Published analysis (LLMCompiler, ICML 2024) demonstrates that these issues resul
 
 **Apache Airflow, n8n, Prefect, Dagster** — pipeline orchestration systems using DAG representations and template-based inter-step data passing. These systems use visual/code-based DAG authoring — they do not use LLMs to compose the DAG from natural language intent.
 
+**CTI-REALM** (arXiv:2603.13517, Microsoft Security AI, March 2026) — A benchmark framework evaluating AI agents on end-to-end detection engineering tasks including CTI-to-rule generation. CTI-REALM uses pre-recorded telemetry from 37 pre-executed simulations as static ground truth. It does not describe: (a) LLM-composed typed pipeline DAGs, (b) typed block registries with input/output port schemas, (c) `{{step_id.output_key}}` inter-step data chaining, or (d) single-round LLM composition followed by deterministic execution. It is a benchmark framework, not a pipeline execution system. CTI-REALM does not anticipate PL-P3's claims.
+
 **No existing system** combines: (1) single-LLM-round pipeline composition from natural language, (2) typed security simulation block schemas exposing input/output port specifications, (3) `{{step_id.output_key}}` output reference template syntax for data chaining, (4) pre-execution type validation, (5) topological sort for parallel wave grouping, and (6) fully deterministic zero-LLM server-side execution.
 
 ---
@@ -264,6 +266,19 @@ This type preservation is important for downstream steps that receive arrays or 
 
 **Claim 10.** The system of claim 1, further comprising a pipeline template registry storing pre-composed pipeline definitions for common security simulation workflows, retrievable by the language model as starting points for customization, such that the language model can modify a template rather than composing from scratch for known workflow patterns.
 
+**Claim 11 (Independent).** A computer-implemented system for parallel execution of typed security simulation workflows, comprising:
+- (a) a typed block registry mapping block identifiers to block definitions, each block definition specifying an ordered set of named input parameters each with a declared data type, and an ordered set of named output parameters each with a declared data type;
+- (b) a dependency extractor configured to receive a pipeline specification comprising a set of steps, each step referencing a block identifier and an input map in which data dependencies between steps are expressed as reference tokens of the form `{{predecessor_step_identifier.output_name}}`, and to extract, for each step, the set of predecessor step identifiers named in the step's input map;
+- (c) a wave scheduler configured to perform topological ordering of the steps and to assign steps to execution waves such that all steps within a given wave have no dependency on any other step within the same wave, and each step's predecessors appear in earlier waves;
+- (d) a concurrent wave executor configured to, for each wave in topological order, submit all steps in the wave for concurrent asynchronous execution and await completion of all steps before advancing to the next wave; and
+- (e) a type-preserving resolver configured to, immediately before executing each step, resolve each reference token in the step's input map by: returning the referenced predecessor output value in its original data type when the reference token constitutes the entirety of the input value, and returning a string representation when the reference token is embedded within a larger string value.
+
+**Claim 12.** The system of claim 11, wherein the wave scheduler detects cycles in the dependency graph and, upon detecting a cycle, assigns the step with the fewest remaining predecessors to the current wave to break the cycle, preserving forward progress rather than rejecting the pipeline.
+
+**Claim 13.** The system of claim 11, wherein the type-preserving resolver is configured to recursively resolve reference tokens appearing in list-valued and object-valued input map entries, such that a step receiving a list of reference tokens receives a list of resolved values each in their original data type.
+
+**Claim 14.** The system of claim 11, further comprising a pre-execution validator configured to, before any wave is executed: verify each step's block identifier exists in the typed block registry, verify each reference token names an output key declared in the referenced block definition's output schema, and verify that the declared output type is compatible with the declared input type of the receiving parameter per a type compatibility table — and to surface all validation errors to the calling system before any step is executed.
+
 ---
 
 ## Abstract
@@ -286,8 +301,21 @@ A system and method for composing and executing security simulation pipelines in
 
 ## Notes for Patent Counsel
 
-**Primary distinction from US12537846:** That patent describes calling the LLM iteratively during execution. Claim 1(c) and claim 2 explicitly specify "invoke a language model exactly once" and "zero language model invocations" during execution. The architectural inversion is the core novelty.
+**Primary distinction from US12537846 (Microsoft):** That patent describes calling the LLM iteratively during execution, receiving execution results, and using them as context for the next LLM call (observing-reacting loop). Claim 1(c) and Claim 2 explicitly specify "invoke a language model exactly once" and "zero language model invocations" during execution. The architectural inversion is the core novelty. Quote US12537846 in the specification as the prior art being improved upon.
 
-**Distinction from general plan-then-execute patterns:** General plan-then-execute LLM papers (arXiv:2509.08646) describe the paradigm but not: (1) typed port schemas with input/output type specifications, (2) `{{step_id.output_key}}` reference syntax, (3) pre-execution type validation, (4) dynamic registry discovery via API endpoint, or (5) security simulation domain blocks. The claim should be narrowed to the specific combination of these elements rather than plan-then-execute generally.
+**Distinction from arXiv:2509.08646 (general plan-then-execute, Sep 2025):** This paper advocates plan-then-execute as a general security architectural principle but does not describe: (1) typed block port schemas, (2) `{{step_id.output_key}}` reference syntax, (3) pre-execution type validation, (4) dynamic registry discovery via API, or (5) the type-preserving template resolution (fullmatch → original type). The claims must be narrowed to this specific combination rather than claiming the general pattern. The paper is NOT a blocking reference — it supports the motivation section but does not anticipate the claims.
 
-**Strongest novel element:** The dynamic discovery endpoint (claim 7) allowing the LLM to retrieve current block schemas at composition time — blocks added after deployment are immediately available without prompt changes. This specific pattern applied to security simulation pipeline composition appears in no prior art.
+**CTI-REALM (arXiv:2603.13517, Mar 2026) — NOT prior art for PL-P3:** CTI-REALM is a benchmark framework, not a pipeline composition system. It does not describe typed block registries, LLM-composed DAGs, or the `{{step_id.output_key}}` template syntax. Mention in specification only to distinguish context.
+
+**Claim 11 — Standalone Wave Execution Claim:** This independent claim covers the parallel wave execution mechanism as a standalone invention, independent of LLM composition. Even if Claims 1–3 were rejected on grounds that LLM-based composition is anticipated, Claim 11 covers the typed-block-registry + wave-scheduler + type-preserving-resolver system which has no prior art as a security-simulation-specific construct. Airflow/Prefect/Dagster are general workflow engines without typed block vocabularies or the type-preserving resolver rule. Claim 11 provides a fallback patent position.
+
+**Working code for enablement:** The following source files are the reduction-to-practice evidence:
+- `backend/agent/pipeline/executor.py` — `_topological_waves()` (wave scheduler), `_resolve()` (type-preserving resolver), `validate_pipeline()` (pre-execution validator), `PipelineExecutor.run()` (concurrent wave executor)
+- `backend/agent/pipeline/blocks.py` — `BLOCK_REGISTRY` (typed block registry), `BlockDef` class (block definition schema)
+- `backend/agent/pipeline/tools.py` — `_run_pipeline()` (composition engine, single LLM call), `register_pipeline_tools()` (discovery endpoint)
+
+**Strongest novel elements in priority order:**
+1. Single-LLM-round composition with zero-LLM deterministic execution (Claims 1, 2, 3) — directly inverts US12537846
+2. Type-preserving template resolver — `fullmatch` → original type (Claim 6, Claim 13) — no prior art in any template engine or workflow system
+3. Dynamic block registry discovery endpoint for LLM-at-composition-time schema retrieval (Claim 7) — no prior art found
+4. Wave-based parallel execution with cycle fallback guarantee (Claim 11, Claim 12) — custom variant of topological sort, applied to security simulation
