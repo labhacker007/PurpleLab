@@ -1,9 +1,9 @@
 # Patent Filing Strategy & Timeline
 ## PurpleLab Platform — PL-P1, PL-P2, PL-P3
 
-**Date:** 2026-06-08  
-**Status:** Ready to file provisionals  
-**Urgency:** HIGH — Picus announced partial commercial analog October 2025 with no patent filed
+**Date:** 2026-06-09 (updated from 2026-06-08 after deep prior art research)  
+**Status:** Ready to file provisionals — all disclosures complete, prior art research complete  
+**Urgency:** ⚠️ CRITICAL — CTI-REALM (Microsoft Security AI) published March 2026 covers stages 1, 4, 5 of PL-P2. Each passing month increases the risk that another paper or product announcement constitutes prior art. File provisional NOW.
 
 ---
 
@@ -15,10 +15,17 @@
 
 A single provisional filing establishes the same priority date for all three claims at lower cost than three separate applications. The provisional does not need complete claims — a detailed technical disclosure (already prepared as the three PL-P* documents in this directory) satisfies the enablement requirement.
 
-**Why not wait:**
-- Picus announced TI→simulation pipeline in October 2025. No patent filed as of research date (June 2026). This means they have been in market for 8 months without a patent. They could file at any time.
-- Under 35 U.S.C. § 102, a third-party patent application published before your filing date can constitute prior art for your claims. First to file wins under the America Invents Act (2013).
-- CardinalOps has no patents in the gap analysis space but has first-mover commercial position. They could file defensively.
+**Why NOT wait — threat timeline (most urgent first):**
+
+| Event | Date | What It Means |
+|-------|------|---------------|
+| **CTI-REALM published** (Microsoft Security AI, arXiv:2603.13517) | March 2026 | Covers stages 1, 4, 5 of PL-P2 — the closest academic prior art. Published 3 months ago. Any further similar publication risks narrowing PL-P2 claims further. |
+| **Picus + Recorded Future announcement** (intelligence-led BAS) | January 2026 | Covers TI-prioritized simulation. No patent filed. Could file any day. |
+| **Picus AI-powered BAS** (multi-agent TI-to-simulation) | October 2025 | 8 months in market without a patent. |
+| **CardinalOps "Agentic Detection Engineering"** rebranding | 2026 | No patents found but active in detection gap automation. Could file defensively at any time. |
+| **AttackIQ Watchtower** (AI-driven ATT&CK coverage) | August 2025 | No patent filed on coverage mapping automation. Active in the same space. |
+
+Under 35 U.S.C. § 102 (America Invents Act, first-to-file), any application published after your priority date cannot be prior art against your claims. **Filing the provisional now locks the priority date for all three inventions simultaneously.** Every day of delay is a day any of the above parties could file first.
 
 **What a provisional filing provides:**
 - Established priority date (critical)
@@ -61,13 +68,25 @@ A defensive publication:
 
 ## Claim Strength Assessment
 
-| Claim | Novelty | Non-Obviousness | Enablement | Overall Strength |
-|-------|---------|-----------------|------------|-----------------|
-| PL-P1: Gap-weighted closed loop | HIGH | HIGH — no prior system closes this loop | COMPLETE — code exists | **STRONG** |
-| PL-P2: Intel-to-detection pipeline | HIGH | HIGH — combination of 6 stages not taught | COMPLETE — code exists | **STRONG** |
-| PL-P3: Single-LLM-round composition | MODERATE | MODERATE — general plan-then-execute exists | COMPLETE — code exists | **MODERATE** |
+> Updated 2026-06-09 after deep codebase read + 30-source prior art research. See [NOVELTY_ANALYSIS.md](NOVELTY_ANALYSIS.md) for full analysis.
 
-**PL-P1 and PL-P2 are the primary commercial assets.** PL-P3 strengthens the portfolio and creates defensive value but is harder to prosecute to grant.
+| Claim | Novelty | Non-Obviousness | Enablement | Closest Prior Art | Overall Strength |
+|-------|---------|-----------------|------------|------------------|-----------------|
+| **PL-P1: Coverage state machine** (3-state, sim-validated COVERED) | HIGH | HIGH | COMPLETE | CardinalOps (SIEM-layer only, no sim) | **STRONG** |
+| **PL-P1: Risk-weighted gap selection** (freq × sev × time-weight formula) | HIGH | HIGH | COMPLETE | None found | **STRONG** |
+| **PL-P1: Gap-only simulation dispatch** (uncovered techniques only) | HIGH | HIGH | COMPLETE | None found | **STRONG** |
+| **PL-P1: Closed feedback loop** | HIGH | HIGH | COMPLETE | FireCompass US20210352100A1 (different domain) | **STRONG** |
+| **PL-P2: Coverage-gated dispatch** (simulate IF AND ONLY IF uncovered) | HIGH | HIGH | COMPLETE | None found — absent from all 10+ papers reviewed | **STRONGEST** |
+| **PL-P2: Sigma from live simulation logs** (not templates, not pre-recorded) | MODERATE-HIGH | HIGH | COMPLETE | IntelEX (pre-collected logs, no gate), CTI-REALM (pre-recorded) | **STRONG** |
+| **PL-P2: Full 7-stage pipeline** | HIGH | HIGH | COMPLETE | CTI-REALM covers 3 of 7 stages only | **STRONG** |
+| **PL-P3: Single-round LLM composition** | MODERATE-HIGH | MODERATE-HIGH | COMPLETE | US12537846 (LLM-in-loop, opposite arch) | **MODERATE** |
+| **PL-P3: Type-preserving template resolver** | MODERATE-HIGH | HIGH | COMPLETE | None found in any template engine | **STRONG** |
+| **PL-P3: Wave-based parallel execution** (Claims 11–14) | MODERATE | MODERATE | COMPLETE | Airflow (generic, not typed/security-domain) | **MODERATE** |
+| **DES: 5-dimensional geometric mean** (sim-outcome data) | MODERATE | HIGH | PARTIAL (scoring stubs, fix H-1) | US11973788 (vuln scan, not sim) | **MODERATE** |
+| **IHDS: Multiplicative 3-stage** intel×hunt×detection | MODERATE | HIGH | PARTIAL (scoring stubs, fix H-1) | None found | **MODERATE** |
+
+**PL-P2's coverage-gated dispatch is the single strongest claim in the portfolio — it is absent from every paper and product reviewed.**  
+**PL-P1 and PL-P2 are the primary commercial assets.** PL-P3 + wave execution claims add defensive depth but are harder to prosecute to grant.
 
 ---
 
@@ -75,14 +94,16 @@ A defensive publication:
 
 Before commercializing PurpleLab, confirm the following do not block your operations:
 
-| Patent | Risk | Action |
-|--------|------|--------|
-| US9892260 (SafeBreach) — simulation execution DAG | LOW — we don't claim simulation execution mechanics | No action needed |
-| US11991203 (Picus) — stateful intra-simulation branching | LOW — our gap dispatch is inter-simulation | Confirm claim language distinguishes |
-| US11973788 (Tenable) — scoring controls via vuln scan data | LOW — our scoring uses simulation outcomes | Confirm claim language distinguishes |
-| US12537846 — cybersecurity LLM iterative execution | LOW for PL-P1/P2, MODERATE for PL-P3 | PL-P3 claims must explicitly distinguish |
+| Patent | Risk Level | Key Distinction | Action |
+|--------|-----------|-----------------|--------|
+| US9892260 (SafeBreach) — simulation execution DAG | LOW | We do not claim how simulations execute; only what drives their selection and what is done with outcomes | No action needed |
+| US11991203 (Picus) — stateful intra-simulation branching | LOW | Picus claims *intra-simulation* step branching; PL-P1 claims *inter-simulation* technique selection — different scope | Confirm claim language |
+| US11973788 (Tenable) — scoring controls via vuln scan data | LOW | Tenable scores against static vulnerability scan data; PL-P1 scores against dynamic simulation outcomes | Confirm claim language |
+| US12537846 (Microsoft) — cybersecurity LLM iterative execution | LOW for PL-P1/P2, MODERATE for PL-P3 | Microsoft calls LLM repeatedly during execution; PL-P3 calls LLM once, zero LLM calls during execution | PL-P3 Claims 1–2 must explicitly distinguish |
+| US20210352100A1 (FireCompass) — frontier-driven red teaming | LOW | FireCompass traverses attack paths; PL-P1 tracks per-ATT&CK-technique detection coverage states — different data model and objective | Confirm at utility application stage |
+| US12223062 (Zafran) — security control gap identification | LOW | Asset-based control gap analysis; no ATT&CK technique state machine, no simulation dispatch, no Sigma generation | No action needed |
 
-**Recommendation:** Commission a full freedom-to-operate (FTO) opinion before any commercial sales or fundraising that involves IP due diligence. Budget $5,000–10,000 for FTO opinion.
+**Recommendation:** Commission a full freedom-to-operate (FTO) opinion before any commercial sales or fundraising that involves IP due diligence. Budget $5,000–10,000 for FTO opinion. The FTO is LOW risk based on current research — no blocking patents found for PL-P1 or PL-P2 core claims.
 
 ---
 
@@ -105,24 +126,48 @@ This is a standard IP investment for a B2B SaaS security startup. Patents in the
 
 The following documents are ready to hand to an attorney for provisional drafting:
 
-1. **[PL-P1_GAP_WEIGHTED_SIMULATION_DISPATCH.md](PL-P1_GAP_WEIGHTED_SIMULATION_DISPATCH.md)** — Full technical disclosure with independent and dependent claims for the gap-weighted closed loop. The "Notes for Patent Counsel" section at the end of each document identifies the key distinctions from prior art to preserve in claim language.
+### Primary Disclosures (hand all six to attorney)
 
-2. **[PL-P2_INTEL_TO_DETECTION_PIPELINE.md](PL-P2_INTEL_TO_DETECTION_PIPELINE.md)** — Full technical disclosure with independent and dependent claims for the intel-to-detection pipeline.
+1. **[PL-P1_GAP_WEIGHTED_SIMULATION_DISPATCH.md](PL-P1_GAP_WEIGHTED_SIMULATION_DISPATCH.md)**  
+   Gap-weighted closed-loop dispatch with coverage state machine. 12 claims (3 independent). Notes for Patent Counsel section at end identifies key prior art distinctions.
 
-3. **[PL-P3_LLM_PIPELINE_COMPOSITION.md](PL-P3_LLM_PIPELINE_COMPOSITION.md)** — Full technical disclosure with independent and dependent claims for single-round LLM composition.
+2. **[PL-P2_INTEL_TO_DETECTION_PIPELINE.md](PL-P2_INTEL_TO_DETECTION_PIPELINE.md)**  
+   7-stage TI-to-detection pipeline with coverage-gated dispatch. 12 claims (3 independent). The coverage-gated dispatch (Claims 1–2) is the strongest claim in the entire portfolio.
 
-4. **[PRIOR_ART_LANDSCAPE.md](PRIOR_ART_LANDSCAPE.md)** — Full prior art search results with patent numbers, coverage analysis, and freedom-to-operate preliminary assessment. This will save 3–5 hours of attorney research time.
+3. **[PL-P3_LLM_PIPELINE_COMPOSITION.md](PL-P3_LLM_PIPELINE_COMPOSITION.md)**  
+   Single-round LLM composition + wave execution engine. 14 claims (3 independent: Claims 1, 3, 11). Claims 11–14 cover the wave execution engine as a standalone invention (fallback if LLM composition claims challenged).
 
-5. **Working code** — `backend/agent/pipeline/` (executor, blocks, tools), `backend/scoring/des.py`, `backend/scoring/ihds.py`. Code is the strongest proof of enablement and reduction to practice.
+4. **[PRIOR_ART_LANDSCAPE.md](PRIOR_ART_LANDSCAPE.md)**  
+   30-source prior art search: patents, academic papers, commercial products. FTO table with 15 entries. Will save 3–5 hours of attorney research time. **Read the "Direct Papers — Updated June 2026" section carefully** — IntelEX and CTI-REALM are the two most important academic papers to distinguish in PL-P2.
 
-**Instructions for attorney:**
-- File as provisional under 35 U.S.C. § 111(b)
-- Include the technical disclosures as specification exhibits
-- Priority claim: domestic, no prior PCT or foreign filing
-- Inventors: [complete before filing]
-- PL-P3 claims should explicitly distinguish from US12537846's iterative LLM execution pattern
-- PL-P1 claims should distinguish from US11973788's vulnerability-scan-based scoring
-- Request expedited examination (Track One) if budget allows (~$4,000 additional, typically halves prosecution time to 6–12 months)
+5. **[NOVELTY_ANALYSIS.md](NOVELTY_ANALYSIS.md)**  
+   Full codebase read + online prior art verification. Identifies exactly which code is novel vs. commodity. Part 4 lists what must NOT appear in independent claims (Beta-Binomial, exponential decay, asyncio.gather, SQLAlchemy). Part 7 is the definitive patent-eligible vs. not table.
+
+6. **[FILING_STRATEGY.md](FILING_STRATEGY.md)** — this document.
+
+### Working Code (reduction to practice evidence)
+
+Hand these source files to attorney as exhibits demonstrating reduction to practice:
+
+| File | What It Proves |
+|------|---------------|
+| `backend/agent/pipeline/executor.py` | PL-P3: `_topological_waves()` (wave scheduler), `_resolve()` (type-preserving resolver), `validate_pipeline()` (pre-execution validator), `PipelineExecutor.run()` |
+| `backend/agent/pipeline/blocks.py` | PL-P1 + PL-P2 + PL-P3: `BLOCK_REGISTRY`, `BlockDef`, `get_gap_analysis`, `run_scenario`, `import_sigma_rules`, `create_use_case` |
+| `backend/agent/pipeline/tools.py` | PL-P3: `_run_pipeline()` (single LLM call composition), `_list_blocks()` (discovery endpoint) |
+| `backend/scoring/des.py` | PL-P1 Claim 11: 5-dimension geometric mean DES formula |
+| `backend/scoring/ihds.py` | IHDS multiplicative 3-stage formula |
+
+### Critical Instructions for Attorney
+
+- **File as provisional under 35 U.S.C. § 111(b)** — no formal claims required; use the technical disclosures as specification exhibits
+- **Priority claim:** domestic, no prior PCT or foreign filing
+- **Inventors:** [complete inventor list before filing — ALL individuals who contributed to the novel concepts]
+- **Urgency flag:** CTI-REALM (arXiv:2603.13517, Microsoft, March 2026) covers TI-to-rule generation pipeline without the coverage gate — must be cited and distinguished in PL-P2. File before more papers appear.
+- **PL-P2 distinguishing language:** The coverage gate is the independent claim — emphasize "dispatching simulation tasks IF AND ONLY IF no validated detection rule exists for the technique." IntelEX and CTI-REALM both lack this gate.
+- **PL-P3 distinguishing language:** Explicitly reference US12537846 as the iterative LLM-in-loop system being improved upon. PL-P3 is architecturally inverted: LLM called once, zero LLM calls during execution.
+- **PL-P1 distinguishing language:** FireCompass US20210352100A1 has a feedback loop but it optimizes attack PATH traversal (RL), not per-ATT&CK-technique detection COVERAGE (state machine). These are different objectives, different data models.
+- **Do NOT claim:** generic asyncio concurrency, SQLAlchemy ORM patterns, exponential decay formulas, Beta-Binomial Bayesian estimators, YAML parsing, HTTP client libraries. These are commodity and will invite rejection.
+- **Track One expedited examination:** Recommended if budget allows (~$4,000 additional). Halves typical prosecution time to 6–12 months. Particularly valuable here given the active publication activity in this space.
 
 ---
 

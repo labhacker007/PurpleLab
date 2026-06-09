@@ -319,3 +319,21 @@ A system and method for composing and executing security simulation pipelines in
 2. Type-preserving template resolver — `fullmatch` → original type (Claim 6, Claim 13) — no prior art in any template engine or workflow system
 3. Dynamic block registry discovery endpoint for LLM-at-composition-time schema retrieval (Claim 7) — no prior art found
 4. Wave-based parallel execution with cycle fallback guarantee (Claim 11, Claim 12) — custom variant of topological sort, applied to security simulation
+
+---
+
+## Reduction to Practice
+
+The following source files constitute a working reduction to practice of the claimed invention as of June 2026:
+
+| File | Function / Symbol | Claim Elements Demonstrated |
+|------|------------------|-----------------------------|
+| `backend/agent/pipeline/executor.py` | `_topological_waves()` | Claim 11(c): wave scheduler — topological sort producing independent concurrent waves; Claim 12: cycle fallback (fewest-predecessor step) |
+| `backend/agent/pipeline/executor.py` | `_resolve()` | Claim 6 + Claim 11(e): type-preserving resolver — `re.fullmatch(r"^\{\{[^}]+\}\}$", v)` → returns original Python type; embedded references → string coercion; Claim 13: recursive resolution for list/object inputs |
+| `backend/agent/pipeline/executor.py` | `validate_pipeline()` | Claim 14: pre-execution validator — verifies block IDs in registry, output keys in block def schema, and type compatibility before any wave executes |
+| `backend/agent/pipeline/executor.py` | `PipelineExecutor.run()` | Claim 11(d): concurrent wave executor — `asyncio.gather(*tasks)` per wave; sequential wave advancement |
+| `backend/agent/pipeline/blocks.py` | `BLOCK_REGISTRY`, `BlockDef` | Claim 11(a) + Claim 3(a): typed block registry — 15 blocks each with `inputs` (name/type/required) and `outputs` (name/type) schema |
+| `backend/agent/pipeline/tools.py` | `_run_pipeline()` | Claims 1(a)+(b): single LLM call to compose pipeline JSON; Claim 1(d): zero LLM calls during execution |
+| `backend/agent/pipeline/tools.py` | `register_pipeline_tools()` | Claim 7: discovery endpoint — serializes `BLOCK_REGISTRY` as tool schema for LLM consumption at composition time |
+
+The system is fully operable: a natural language pipeline description can be submitted to `_run_pipeline()`, which invokes the LLM once to produce pipeline JSON, after which `PipelineExecutor.run()` executes all steps deterministically with no further LLM calls. This constitutes a complete, working implementation of the single-round LLM composition + deterministic wave execution architecture.

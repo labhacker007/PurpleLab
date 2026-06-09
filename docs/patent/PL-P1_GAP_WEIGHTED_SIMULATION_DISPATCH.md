@@ -233,9 +233,27 @@ This embodiment is appropriate for organizations that wish to audit simulation a
 
 **Claim 10.** The method of claim 1, wherein the simulation tasks are dispatched only for technique identifiers in the uncovered set and not for technique identifiers already in COVERED state, such that simulation resources are concentrated on improving coverage rather than validating already-covered techniques.
 
-**Claim 11.** The method of claim 1, wherein the simulation outcome data further feeds a Detection Effectiveness Score computation comprising a weighted geometric mean of at least: a breadth dimension measuring the fraction of in-scope technique identifiers in COVERED state, a depth dimension measuring the average number of detection rules per COVERED technique, and a freshness dimension measuring the fraction of COVERED techniques validated within a recency window.
+**Claim 11.** The method of claim 1, wherein the simulation outcome data further feeds a Detection Effectiveness Score (DES) computation, the DES being a weighted geometric mean of five dimensions:
+- (i) a breadth dimension comprising the fraction of in-scope technique identifiers in COVERED state;
+- (ii) a depth dimension comprising a mean of capped per-technique rule densities across all in-scope techniques, wherein the density for each technique is the number of detection rules associated with that technique divided by a configurable maximum cap;
+- (iii) a freshness dimension comprising a mean of time-decay values for each COVERED technique, wherein the time-decay value decreases as the elapsed time since last simulation increases;
+- (iv) a pass-rate dimension comprising a statistical estimator for the probability that a simulation of an in-scope technique will produce a detection event, incorporating a prior belief parameterized by configurable alpha and beta values; and
+- (v) a signal-quality dimension comprising a mean of per-rule quality values derived from each rule's estimated false positive rate;
+wherein the weighted geometric mean is computed as exp(sum of weight_k × log(max(dimension_k, ε))) for a small positive epsilon preventing log(0), and the resulting DES is a scalar in [0, 100] such that any near-zero dimension causes the composite score to approach zero.
 
 **Claim 12.** The method of claim 1, wherein the gap analyzer computes separate weighted risk scores per organizational tenant, allowing different organizations sharing a multi-tenant deployment to maintain independent technique coverage stores and dispatch schedules.
+
+**Claim 13 (Independent — DES Scoring System).** A computer-implemented system for scoring the effectiveness of a detection rule library against adversary techniques, comprising:
+- a technique inventory specifying a set of in-scope adversary technique identifiers from a standardized adversary behavior framework;
+- a simulation outcome store recording, for each adversary technique identifier, the results of one or more simulations including whether detection rules produced detection events, the timestamps of those events, and the identifiers of the rules that fired;
+- a multi-dimensional scoring engine configured to compute a Detection Effectiveness Score (DES) as a weighted geometric mean of at least five distinct scoring dimensions derived from the simulation outcome store: a breadth dimension, a depth dimension, a freshness dimension, a pass-rate dimension, and a signal-quality dimension; and
+- a score output interface configured to return the DES as a scalar value in [0, 100] representing the composite effectiveness of the detection rule library, wherein the geometric mean aggregation ensures that near-zero performance on any single dimension causes the composite DES to approach zero.
+
+**Claim 14 (Independent — IHDS Scoring System).** A computer-implemented system for scoring an organization's integrated threat intelligence, threat hunting, and detection effectiveness posture, comprising:
+- an intelligence coverage component configured to compute a score reflecting the fraction of in-scope adversary technique identifiers for which recent threat intelligence data exists, weighted by a time-decay function applied to the observation timestamp of each intelligence entry;
+- a hunt coverage component configured to compute a score reflecting the fraction of threat-intelligence-covered techniques for which threat hunting activity has been executed within a recency window, weighted by the same time-decay function;
+- a detection effectiveness component configured to compute a score reflecting the fraction of hunted techniques for which detection rules have been confirmed effective through simulation, incorporating a statistical estimator for detection probability; and
+- a composite score computation configured to produce an Integrated Hunt and Detection Score (IHDS) as the product of the intelligence coverage score, the hunt coverage score, and the detection effectiveness score, such that a score of zero in any component causes the composite IHDS to be zero, reflecting the kill-chain dependency in which intelligence, hunting, and detection must all be present for an organization to be prepared against a given adversary technique.
 
 ---
 
@@ -271,3 +289,20 @@ A system and method for automated, iterative detection coverage improvement thro
 **Strongest novel element:** Step (d) — generating simulation tasks automatically without human initiation, specifically for uncovered techniques only, based on risk-weighted ranking of the gap. The three-part risk formula (frequency_weight × α + severity_weight × β + time_weight × γ) as the ranking mechanism for simulation dispatch is not found in any prior art.
 
 **Working code:** `backend/agent/pipeline/blocks.py` `get_gap_analysis` block + `run_scenario` block implement stages (b)–(e). The coverage state machine transitions are in the proposed coverage store schema. Enablement is strong.
+
+---
+
+## Reduction to Practice
+
+The following source files in the PurpleLab codebase constitute a working reduction to practice of the claimed invention as of June 2026:
+
+| File | Claim Elements Demonstrated |
+|------|---------------------------|
+| `backend/agent/pipeline/blocks.py` — `get_gap_analysis` block | Claim 1(b): gap analyzer queries coverage store and returns ranked uncovered technique list; Claim 1(c): weighted risk score computation |
+| `backend/agent/pipeline/blocks.py` — `run_scenario` block | Claim 1(d)+(e): automatic simulation task generation and dispatch to simulation engine |
+| `backend/agent/pipeline/blocks.py` — `create_use_case` block | Claim 1(g): coverage store update on simulation completion |
+| `backend/scoring/des.py` — `compute_des()` function | Claims 11+13: 5-dimensional geometric mean DES (breadth, depth, freshness, pass_rate, signal_quality); exp(Σ weight_k × log(max(dim_k, ε))) formula |
+| `backend/scoring/ihds.py` — `compute_ihds()` function | Claim 14: multiplicative 3-stage IHDS = intel_score × hunt_score × detection_score |
+| `backend/app/database/models.py` — `TechniqueScore` model | Claim 1(a)+Claim 3: coverage store schema with technique_id, coverage_state, last_simulated_at, rule_ids JSON |
+
+The system is operable: gap analysis can be triggered via the PurpleLab pipeline API, simulations execute against a live instrumented environment, and the coverage store is updated in response. This constitutes a complete, working implementation of the claimed closed-loop feedback method.

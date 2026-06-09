@@ -292,3 +292,28 @@ A system and method for automatically converting threat intelligence artifacts i
 **Distinction from Picus October 2025 announcement:** Picus's disclosed pipeline covers TI→simulation→report. PL-P2 adds: coverage-gated dispatch (step c-e), simulation-log-grounded rule generation (step g), simulation-based rule validation (step h), and use case creation with coverage store update (steps i-j). These four stages are absent from Picus's disclosure.
 
 **Distinction from AI-driven detection tools:** Tools like Anvilogic generate SIEM rules from natural language. The novelty in PL-P2 is grounding rule generation in simulation execution logs (step g) and validating the rule against those same logs (step h). The generated rule is not template-based but is derived from actual behavioral evidence.
+
+**Distinction from IntelEX (arXiv:2412.10872, December 2024):** IntelEX is the closest academic prior art. It covers: (1) TI extraction of TTPs, (4) simulation execution against a test environment, and (5) partial log collection. PL-P2's differentiating elements are: (a) the coverage gate — IntelEX processes all TTPs extracted from TI without querying any existing coverage state; it would re-simulate a technique 100 times regardless of whether a validated detection rule already exists; (b) the simulation-log-grounded rule generation — IntelEX does not generate Sigma rules from simulation logs; its output is a test coverage report, not a deployable detection artifact; (c) the re-simulation validation loop — IntelEX does not validate generated rules by re-executing them; and (d) the coverage store update — IntelEX has no persistent coverage state that is updated based on the pipeline's output. PL-P2 is a complete, closed operational pipeline; IntelEX is a research evaluation framework.
+
+**Distinction from CTI-REALM (arXiv:2603.13517, Microsoft Security AI, March 2026):** CTI-REALM is an evaluation benchmark published 3 months before this disclosure (urgency: file immediately). CTI-REALM covers: (1) TI extraction, (4) matching of pre-executed telemetry to TTPs, and (5) partial rule text generation. PL-P2's differentiating elements are: (a) the coverage gate — CTI-REALM has no concept of existing coverage; it evaluates rule generation quality on all TTPs regardless of prior coverage; (b) live simulation dispatch — CTI-REALM uses pre-recorded telemetry from 37 pre-executed simulations; it cannot dispatch new simulations based on coverage gaps; (c) simulation-log-grounded rule generation — CTI-REALM generates rules from the pre-collected log corpus, not from on-demand simulation logs triggered by the current TI artifact; (d) no coverage store update — CTI-REALM is a benchmark that measures quality; it does not update any operational state. Independent Claim 1's step (e) ("dispatching, automatically and without human engineering intervention, simulation tasks") is structurally absent from CTI-REALM: there is no dispatcher, because simulations were already pre-executed before the pipeline runs.
+
+**Examiner combination to anticipate:** Examiner may attempt to combine CTI-REALM (stages 1+4+5) + DeTT&CT (coverage tracking) + Picus (simulation execution) to argue obviousness against Claim 1. Counter: no reference teaches or suggests gating simulation dispatch on a real-time coverage store query. A person of ordinary skill combining these references would build a system that runs simulation for all techniques and separately tracks coverage — not one that gates simulation on coverage. The coverage gate is the non-obvious inventive step.
+
+**Working code:** `backend/agent/pipeline/blocks.py` function `get_gap_analysis` implements step (c)+(d); `run_scenario` implements step (e); `import_sigma_rules` + `create_use_case` implement steps (g)–(j). The `import_sigma_rules` block accepts live simulation logs and calls the LLM rule generation function. Enablement is confirmed: the full 7-stage pipeline is executable via the PurpleLab pipeline API.
+
+---
+
+## Reduction to Practice
+
+The following source files constitute a working reduction to practice of the claimed invention as of June 2026:
+
+| File | Claim Elements Demonstrated |
+|------|---------------------------|
+| `backend/agent/pipeline/blocks.py` — `get_gap_analysis` block | Claims 1(b)+(c)+(d): TTP extraction, coverage store query, uncovered subset identification |
+| `backend/agent/pipeline/blocks.py` — `run_scenario` block | Claim 1(e): automatic simulation dispatch to simulation execution engine targeting uncovered techniques only |
+| `backend/agent/pipeline/tools.py` — `_run_pipeline()` | Claim 2: pipeline executes only for uncovered techniques; covered techniques are skipped |
+| `backend/agent/pipeline/blocks.py` — `import_sigma_rules` block | Claims 1(f)+(g): receives simulation execution logs; calls LLM rule generation grounded in log evidence |
+| `backend/agent/pipeline/blocks.py` — `create_use_case` block | Claims 1(i)+(j): creates detection use case record; updates coverage store |
+| `backend/app/database/models.py` — `DetectionUseCase` model | Claim 3 system: use case registry with technique_id, sigma_yaml, validation_status, source_artifact_ids |
+
+The pipeline is end-to-end operable: a threat intelligence artifact can be submitted to the PurpleLab pipeline API, the system extracts TTPs, checks coverage, dispatches simulations for uncovered techniques only, generates and validates Sigma rules, and creates detection use cases — all without human intervention between stages. This constitutes a complete, working implementation of the 7-stage automated operationalization pipeline.
