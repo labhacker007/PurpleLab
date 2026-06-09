@@ -1,0 +1,290 @@
+"""EDR vendor-specific benign event templates.
+
+Sourced from official vendor documentation:
+- CrowdStrike: Streaming API event schemas (ProcessRollup2, NetworkConnectIP4, DnsRequest, UserLogon)
+- SentinelOne: Deep Visibility V2 schema (src.process.*, event.login.*, event.network.*)
+- Microsoft Defender for Endpoint: Advanced Hunting tables (DeviceProcessEvents, DeviceLogonEvents, DeviceNetworkEvents)
+- Carbon Black: CB Live Response / EDR telemetry
+
+All templates use the placeholder tokens from ttp_library._build_substitution_map:
+  {hostname}, {server}, {dc}, {username}, {email}, {domain},
+  {src_ip}, {server_ip}
+Plus EDR-specific tokens resolved in benign_library._resolve_benign_subs:
+  {pid}, {benign_proc}, {benign_site}
+"""
+from __future__ import annotations
+
+from typing import Any
+
+VENDOR_BENIGN_TEMPLATES: dict[str, list[dict[str, Any]]] = {
+
+    # ── CrowdStrike Falcon ──────────────────────────────────────────────────
+    "crowdstrike": [
+        {
+            "severity": "info",
+            "title_template": "CrowdStrike: ProcessRollup2 — {benign_proc} on {hostname}",
+            "payload_template": {
+                "event_simpleName": "ProcessRollup2",
+                "aid": "b1cd4165ce534d5e95f55e4d90cf0a8f",
+                "cid": "abc1234567890def",
+                "ComputerName": "{hostname}",
+                "UserName": "{domain}\\{username}",
+                "UserSid": "S-1-5-21-1377283216-344919071-3415362939-1001",
+                "ImageFileName": "C:\\Windows\\System32\\{benign_proc}",
+                "CommandLine": "{benign_proc}",
+                "TargetProcessId": "{pid}",
+                "ParentProcessId": "1088",
+                "IntegrityLevel": "Medium",
+                "AuthenticationId": "0x3e7",
+                "SessionId": "1",
+                "SHA256HashData": "4e97c38ca5e9e4c2e46cfd1ef3ebabf4a789c65d3b8a4c8a4d5c7f3b8e9d1234",
+                "MD5HashData": "d41d8cd98f00b204e9800998ecf8427e",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "CrowdStrike: UserLogon — {username} interactive logon on {hostname}",
+            "payload_template": {
+                "event_simpleName": "UserLogon",
+                "aid": "b1cd4165ce534d5e95f55e4d90cf0a8f",
+                "cid": "abc1234567890def",
+                "ComputerName": "{hostname}",
+                "UserName": "{username}",
+                "LogonType": "2",
+                "LogonDomain": "{domain}",
+                "LogonId": "0x8dcdc",
+                "WorkstationName": "{hostname}",
+                "IPAddress": "{src_ip}",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "CrowdStrike: NetworkConnectIP4 — {hostname} → {benign_site}:443",
+            "payload_template": {
+                "event_simpleName": "NetworkConnectIP4",
+                "aid": "b1cd4165ce534d5e95f55e4d90cf0a8f",
+                "cid": "abc1234567890def",
+                "ComputerName": "{hostname}",
+                "UserName": "{domain}\\{username}",
+                "LocalAddressIP4": "{src_ip}",
+                "RemoteAddressIP4": "13.107.42.14",
+                "LocalPort": "52841",
+                "RemotePort": "443",
+                "Protocol": "6",
+                "ConnectionDirection": "1",
+                "ImageFileName": "C:\\Program Files\\Microsoft\\Teams\\current\\Teams.exe",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "CrowdStrike: DnsRequest — {hostname} queries {benign_site}",
+            "payload_template": {
+                "event_simpleName": "DnsRequest",
+                "aid": "b1cd4165ce534d5e95f55e4d90cf0a8f",
+                "cid": "abc1234567890def",
+                "ComputerName": "{hostname}",
+                "UserName": "{domain}\\{username}",
+                "DomainName": "{benign_site}",
+                "RequestType": "1",
+                "DnsRequestCount": "1",
+                "InterfaceIndex": "5",
+                "ImageFileName": "C:\\Windows\\System32\\svchost.exe",
+                "event_platform": "Win",
+            },
+        },
+    ],
+
+    # ── SentinelOne Deep Visibility ─────────────────────────────────────────
+    "sentinelone": [
+        {
+            "severity": "info",
+            "title_template": "SentinelOne: Process started — {benign_proc} by {username}",
+            "payload_template": {
+                "event.type": "Process Creation",
+                "event.category": "process",
+                "endpoint.name": "{hostname}",
+                "endpoint.os": "windows",
+                "src.process.name": "{benign_proc}",
+                "src.process.cmdline": "{benign_proc}",
+                "src.process.pid": "{pid}",
+                "src.process.user": "{domain}\\{username}",
+                "src.process.startTime": "{timestamp}",
+                "src.process.image.path": "C:\\Windows\\System32\\{benign_proc}",
+                "src.process.image.sha256": "4e97c38ca5e9e4c2e46cfd1ef3ebabf4a789c65d3b8a4c8a4d5c7f3b8e9d1234",
+                "src.process.integrityLevel": "medium",
+                "src.process.signedStatus": "signed",
+                "src.process.parent.name": "explorer.exe",
+                "src.process.parent.pid": "2956",
+                "agentId": "S1-Agent-{hostname}",
+                "siteId": "site-0001",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "SentinelOne: User login — {username} on {hostname}",
+            "payload_template": {
+                "event.type": "Login",
+                "event.category": "security",
+                "endpoint.name": "{hostname}",
+                "endpoint.os": "windows",
+                "event.login.userName": "{username}",
+                "event.login.accountName": "{domain}\\{username}",
+                "event.login.accountSid": "S-1-5-21-1377283216-344919071-3415362939-1001",
+                "event.login.loginIsSuccessful": True,
+                "event.login.type": "interactive",
+                "event.login.accountDomain": "{domain}",
+                "event.login.isAdministratorEquivalent": False,
+                "event.login.sessionId": "1",
+                "agentId": "S1-Agent-{hostname}",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "SentinelOne: Network connection — {hostname} → port 443",
+            "payload_template": {
+                "event.type": "IP Connect",
+                "event.category": "network",
+                "endpoint.name": "{hostname}",
+                "endpoint.os": "windows",
+                "src.ip.address": "{src_ip}",
+                "src.port.number": "52841",
+                "dst.ip.address": "13.107.42.14",
+                "dst.port.number": "443",
+                "event.network.direction": "outbound",
+                "event.network.protocolName": "TCP",
+                "event.network.connectionStatus": "established",
+                "src.process.name": "Teams.exe",
+                "src.process.pid": "{pid}",
+                "src.process.user": "{domain}\\{username}",
+                "agentId": "S1-Agent-{hostname}",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "SentinelOne: DNS query — {hostname} queries {benign_site}",
+            "payload_template": {
+                "event.type": "DNS Query",
+                "event.category": "dns",
+                "endpoint.name": "{hostname}",
+                "endpoint.os": "windows",
+                "event.dns.request": "{benign_site}",
+                "event.dns.response": "20.42.73.27",
+                "event.dns.status": "OK",
+                "src.process.name": "chrome.exe",
+                "src.process.pid": "{pid}",
+                "src.process.user": "{domain}\\{username}",
+                "agentId": "S1-Agent-{hostname}",
+            },
+        },
+    ],
+
+    # ── Microsoft Defender for Endpoint ────────────────────────────────────
+    "defender_mde": [
+        {
+            "severity": "info",
+            "title_template": "MDE: ProcessCreated — {benign_proc} on {hostname}",
+            "payload_template": {
+                "ActionType": "ProcessCreated",
+                "Timestamp": "{timestamp}",
+                "DeviceId": "12345678-abcd-1234-abcd-123456789012",
+                "DeviceName": "{hostname}.{domain}",
+                "FileName": "{benign_proc}",
+                "FolderPath": "C:\\Windows\\System32",
+                "SHA256": "4e97c38ca5e9e4c2e46cfd1ef3ebabf4a789c65d3b8a4c8a4d5c7f3b8e9d1234",
+                "MD5": "d41d8cd98f00b204e9800998ecf8427e",
+                "ProcessId": "{pid}",
+                "ProcessCommandLine": "{benign_proc}",
+                "ProcessCreationTime": "{timestamp}",
+                "ProcessIntegrityLevel": "Medium",
+                "AccountDomain": "{domain}",
+                "AccountName": "{username}",
+                "AccountSid": "S-1-5-21-1377283216-344919071-3415362939-1001",
+                "InitiatingProcessFileName": "explorer.exe",
+                "InitiatingProcessId": "2956",
+                "InitiatingProcessAccountName": "{username}",
+                "ReportId": "12345",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "MDE: LogonSuccess — {username} interactive on {hostname}",
+            "payload_template": {
+                "ActionType": "LogonSuccess",
+                "Timestamp": "{timestamp}",
+                "DeviceId": "12345678-abcd-1234-abcd-123456789012",
+                "DeviceName": "{hostname}.{domain}",
+                "AccountDomain": "{domain}",
+                "AccountName": "{username}",
+                "AccountSid": "S-1-5-21-1377283216-344919071-3415362939-1001",
+                "LogonType": "Interactive",
+                "LogonId": "0x8dcdc",
+                "RemoteIP": "",
+                "RemotePort": "0",
+                "ProcessName": "C:\\Windows\\System32\\svchost.exe",
+                "ProcessId": "624",
+                "ReportId": "12346",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "MDE: ConnectionSuccess — {hostname} → {benign_site}:443",
+            "payload_template": {
+                "ActionType": "ConnectionSuccess",
+                "Timestamp": "{timestamp}",
+                "DeviceId": "12345678-abcd-1234-abcd-123456789012",
+                "DeviceName": "{hostname}.{domain}",
+                "RemoteIP": "20.42.73.27",
+                "RemotePort": "443",
+                "RemoteUrl": "https://{benign_site}/",
+                "LocalIP": "{src_ip}",
+                "LocalPort": "52841",
+                "Protocol": "Tcp",
+                "LocalIPType": "Private",
+                "RemoteIPType": "Public",
+                "InitiatingProcessFileName": "msedge.exe",
+                "InitiatingProcessId": "{pid}",
+                "InitiatingProcessAccountName": "{username}",
+                "ReportId": "12347",
+            },
+        },
+    ],
+
+    # ── Carbon Black ───────────────────────────────────────────────────────
+    "carbon_black": [
+        {
+            "severity": "info",
+            "title_template": "CB: Process start — {benign_proc} on {hostname}",
+            "payload_template": {
+                "type": "endpoint.event.procstart",
+                "sensor_id": "1234",
+                "sensor_hostname": "{hostname}",
+                "username": "{domain}\\{username}",
+                "process_name": "{benign_proc}",
+                "cmdline": "{benign_proc}",
+                "process_pid": "{pid}",
+                "process_sha256": "4e97c38ca5e9e4c2e46cfd1ef3ebabf4a789c65d3b8a4c8a4d5c7f3b8e9d1234",
+                "local_ip": "{src_ip}",
+                "parent_name": "explorer.exe",
+                "parent_pid": "2956",
+                "device_os": "WINDOWS",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "CB: Network connection — {hostname} → {benign_site}",
+            "payload_template": {
+                "type": "endpoint.event.netconn",
+                "sensor_hostname": "{hostname}",
+                "username": "{domain}\\{username}",
+                "process_name": "{benign_proc}",
+                "local_ip": "{src_ip}",
+                "local_port": "52841",
+                "remote_ip": "20.42.73.27",
+                "remote_port": "443",
+                "proto": "TCP",
+                "direction": "outbound",
+                "domain": "{benign_site}",
+            },
+        },
+    ],
+}

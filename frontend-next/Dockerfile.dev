@@ -1,0 +1,11 @@
+FROM node:20-alpine
+WORKDIR /app
+
+# Install deps layer — rebuilt only when package.json changes
+COPY package.json ./
+RUN npm install
+
+EXPOSE 3000
+
+# Source is bind-mounted at runtime; node_modules lives in a named volume
+CMD ["npm", "run", "dev"]

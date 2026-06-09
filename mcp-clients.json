@@ -1,0 +1,103 @@
+{
+  "_comment": "PurpleLab MCP Client Configurations — copy the section for your tool",
+  "_note": "Replace YOUR_KEY with your PURPLELAB_MCP_API_KEY from .env (run `grep PURPLELAB_MCP_API_KEY .env`)",
+  "_discovery": "GET http://localhost:8002/api/v2/mcp  — returns live key + all connection instructions",
+
+  "claude_code_cli": {
+    "_comment": "Claude Code CLI — run once in any terminal",
+    "command": "claude mcp add purplelab --transport http --url http://localhost:8002/api/v2/mcp --header 'X-API-Key:YOUR_KEY'",
+    "verify": "claude mcp list"
+  },
+
+  "claude_desktop": {
+    "_comment": "Claude Desktop — add to ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%\\Claude\\claude_desktop_config.json (Windows)",
+    "mcpServers": {
+      "purplelab": {
+        "transport": "http",
+        "url": "http://localhost:8002/api/v2/mcp",
+        "headers": {
+          "X-API-Key": "YOUR_KEY"
+        }
+      }
+    }
+  },
+
+  "claude_desktop_sse": {
+    "_comment": "Claude Desktop via SSE transport (alternative — use if http transport is not supported by your client version)",
+    "mcpServers": {
+      "purplelab": {
+        "transport": "sse",
+        "url": "http://localhost:8002/api/v2/mcp/sse",
+        "headers": {
+          "X-API-Key": "YOUR_KEY"
+        }
+      }
+    }
+  },
+
+  "vscode": {
+    "_comment": "VS Code MCP extension — add to .vscode/mcp.json in your workspace, or User settings.json under 'mcp.servers'",
+    "servers": {
+      "purplelab": {
+        "type": "http",
+        "url": "http://localhost:8002/api/v2/mcp",
+        "headers": {
+          "X-API-Key": "YOUR_KEY"
+        }
+      }
+    }
+  },
+
+  "cursor": {
+    "_comment": "Cursor — add to ~/.cursor/mcp.json",
+    "mcpServers": {
+      "purplelab": {
+        "transport": "http",
+        "url": "http://localhost:8002/api/v2/mcp",
+        "headers": {
+          "X-API-Key": "YOUR_KEY"
+        }
+      }
+    }
+  },
+
+  "joti": {
+    "_comment": "Joti MCP Hub registration — use scripts/register_with_joti.py OR manually POST to Joti /api/mcp-hub/servers",
+    "auto_register_script": "python scripts/register_with_joti.py",
+    "manual_registration": {
+      "url": "http://purplelab-backend:8000/api/v2/mcp",
+      "auth_type": "api_key",
+      "api_key_header": "X-API-Key",
+      "api_key_value": "YOUR_KEY",
+      "name": "PurpleLab Security Simulator",
+      "domains": ["threat_intel", "hunting", "attack_surface"]
+    }
+  },
+
+  "generic_http_jsonrpc": {
+    "_comment": "Any MCP-compatible client — HTTP JSON-RPC 2.0",
+    "endpoint": "POST http://localhost:8002/api/v2/mcp",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-API-Key": "YOUR_KEY"
+    },
+    "example_request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/list",
+      "params": {}
+    }
+  },
+
+  "mcp_inspector": {
+    "_comment": "MCP Inspector (npx @modelcontextprotocol/inspector) — useful for debugging",
+    "command": "npx @modelcontextprotocol/inspector http://localhost:8002/api/v2/mcp --header X-API-Key:YOUR_KEY"
+  },
+
+  "docker_internal": {
+    "_comment": "When your MCP client runs inside Docker on the same host (e.g. Joti containers)",
+    "url": "http://purplelab-backend:8000/api/v2/mcp",
+    "network": "purplelab",
+    "note": "Add purplelab network to your client's docker-compose.yml: networks: [purplelab]"
+  }
+}

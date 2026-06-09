@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "purplelab": {
+      "type": "http",
+      "url": "http://localhost:8002/api/v2/mcp",
+      "headers": {
+        "X-API-Key": "${PURPLELAB_MCP_API_KEY}"
+      },
+      "description": "PurpleLab Security Simulator — EDR, SIEM, Identity, Network controls for SOC testing"
+    }
+  }
+}

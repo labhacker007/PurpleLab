@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PurpleLab — Dev override (hot-reload for backend + frontend)
+#
+#  Usage:
+#    First time (or after package.json / requirements.txt change):
+#      docker compose -f docker-compose.yml -f docker-compose.dev.yml build frontend-dev
+#
+#    Every subsequent session — NO rebuild needed:
+#      docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+#  How it works:
+#    backend  — bind-mounts ./backend → /app/backend; uvicorn --reload picks
+#               up every .py save within ~1 second. No Python rebuild ever.
+#    frontend — uses Dockerfile.dev image; bind-mounts ./frontend-next so
+#               Next.js HMR refreshes the browser within ~1 second.
+#               node_modules lives in a named volume (survives bind-mount).
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Backend: add --reload and bind-mount source ───────────────────────────
+  backend:
+    command: >
+      uvicorn backend.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/backend
+      --timeout-keep-alive 30
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app/backend
+
+  # ── Celery worker: also reload on code change ─────────────────────────────
+  celery_worker:
+    command: celery -A backend.celery_app worker --loglevel=info --concurrency=2 --autoscale=4,2
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app/backend
+
+  # ── Frontend: next dev with HMR ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile.dev
+    image: purplelab-frontend-dev:latest
+    container_name: purplelab-frontend-dev
+    environment:
+      NODE_ENV: development
+      INTERNAL_API_URL: http://purplelab-backend:8000
+    ports:
+      - "${PURPLELAB_FRONTEND_PORT:-3002}:3000"
+    volumes:
+      - ./frontend-next:/app
+      - purplelab_frontend_node_modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - purplelab
+
+volumes:
+  purplelab_frontend_node_modules:
+    driver: local

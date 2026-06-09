@@ -1,0 +1,251 @@
+"""Identity provider vendor-specific benign event templates.
+
+Sourced from official vendor documentation:
+- Okta: System Log API (eventType, actor, outcome, client fields)
+- Microsoft Entra ID: SigninLogs (UserPrincipalName, IPAddress, Status, DeviceDetail)
+- Active Directory: Windows Security Event IDs 4624, 4634, 4768, 4769
+- Cisco ISE: RADIUS/TACACS authentication logs
+"""
+from __future__ import annotations
+
+from typing import Any
+
+VENDOR_BENIGN_TEMPLATES: dict[str, list[dict[str, Any]]] = {
+
+    # ── Okta ────────────────────────────────────────────────────────────────
+    "okta": [
+        {
+            "severity": "info",
+            "title_template": "Okta: user.session.start — {username} authenticated",
+            "payload_template": {
+                "eventType": "user.session.start",
+                "published": "{timestamp}",
+                "actor.id": "00oa1a2b3c4d5e6f7g8h9",
+                "actor.type": "User",
+                "actor.displayName": "{username}",
+                "actor.alternateId": "{email}",
+                "outcome.result": "SUCCESS",
+                "client.ipAddress": "{src_ip}",
+                "client.userAgent.rawUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "client.userAgent.os": "Windows 10",
+                "client.userAgent.browser": "Chrome",
+                "client.geographicalContext.country": "US",
+                "client.geographicalContext.city": "Seattle",
+                "authenticationContext.authenticationProvider": "OKTA",
+                "authenticationContext.authenticationStep": 1,
+                "severity": "INFO",
+                "uuid": "12345678-1234-1234-1234-123456789012",
+                "target": [{"id": "00u1a2b3c4d5e6f7g8h9", "type": "User", "displayName": "{username}"}],
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "Okta: user.authentication.auth_via_okta — {username} MFA success",
+            "payload_template": {
+                "eventType": "user.authentication.auth_via_okta",
+                "published": "{timestamp}",
+                "actor.id": "00oa1a2b3c4d5e6f7g8h9",
+                "actor.type": "User",
+                "actor.displayName": "{username}",
+                "actor.alternateId": "{email}",
+                "outcome.result": "SUCCESS",
+                "client.ipAddress": "{src_ip}",
+                "client.userAgent.os": "Windows 10",
+                "client.userAgent.browser": "Chrome",
+                "authenticationContext.authenticationProvider": "OKTA",
+                "authenticationContext.authenticationStep": 2,
+                "severity": "INFO",
+                "uuid": "22345678-1234-1234-1234-123456789013",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "Okta: app.login.success — {username} accessed {domain} app",
+            "payload_template": {
+                "eventType": "app.login.success",
+                "published": "{timestamp}",
+                "actor.displayName": "{username}",
+                "actor.alternateId": "{email}",
+                "outcome.result": "SUCCESS",
+                "client.ipAddress": "{src_ip}",
+                "client.userAgent.os": "Windows 10",
+                "severity": "INFO",
+                "target": [
+                    {"id": "0oa1a2b3c4d5e6f7", "type": "AppInstance", "displayName": "Microsoft Office 365"},
+                    {"id": "00u1a2b3c4d5e6f7", "type": "User", "displayName": "{username}"},
+                ],
+                "uuid": "32345678-1234-1234-1234-123456789014",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "Okta: user.session.end — {username} signed out",
+            "payload_template": {
+                "eventType": "user.session.end",
+                "published": "{timestamp}",
+                "actor.displayName": "{username}",
+                "actor.alternateId": "{email}",
+                "outcome.result": "SUCCESS",
+                "client.ipAddress": "{src_ip}",
+                "severity": "INFO",
+                "uuid": "42345678-1234-1234-1234-123456789015",
+            },
+        },
+    ],
+
+    # ── Microsoft Entra ID (Azure AD) ───────────────────────────────────────
+    "entra_id": [
+        {
+            "severity": "info",
+            "title_template": "Entra ID: SignIn — {username} → Office 365 Exchange Online",
+            "payload_template": {
+                "UserPrincipalName": "{email}",
+                "UserId": "a1a2a3a4-b1b2-b3b4-c1c2-c1c2c1c2c1c2",
+                "UserDisplayName": "{username}",
+                "IPAddress": "{src_ip}",
+                "Location": "US",
+                "LocationDetails_city": "Seattle",
+                "LocationDetails_state": "WA",
+                "LocationDetails_countryOrRegion": "United States",
+                "AppDisplayName": "Office 365 Exchange Online",
+                "AppId": "00000002-0000-0ff1-ce00-000000000000",
+                "ResourceDisplayName": "Microsoft Graph",
+                "CreatedDateTime": "{timestamp}",
+                "Status_errorCode": "0",
+                "ResultType": "0",
+                "AuthenticationRequirement": "singleFactorAuthentication",
+                "ConditionalAccessStatus": "success",
+                "RiskState": "none",
+                "RiskLevelAggregated": "none",
+                "ClientAppUsed": "Browser",
+                "DeviceDetail_displayName": "{hostname}",
+                "DeviceDetail_operatingSystem": "Windows 10",
+                "DeviceDetail_browser": "Chrome 120.0",
+                "DeviceDetail_isCompliant": True,
+                "IsInteractive": True,
+                "UserType": "Member",
+                "Id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "Entra ID: SignIn — {username} → Microsoft Teams",
+            "payload_template": {
+                "UserPrincipalName": "{email}",
+                "UserDisplayName": "{username}",
+                "IPAddress": "{src_ip}",
+                "AppDisplayName": "Microsoft Teams",
+                "CreatedDateTime": "{timestamp}",
+                "Status_errorCode": "0",
+                "ResultType": "0",
+                "AuthenticationRequirement": "multiFactorAuthentication",
+                "ConditionalAccessStatus": "success",
+                "RiskState": "none",
+                "ClientAppUsed": "Mobile Apps and Desktop clients",
+                "DeviceDetail_operatingSystem": "Windows 10",
+                "IsInteractive": True,
+                "Id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            },
+        },
+    ],
+
+    # ── Active Directory (Windows Security Events) ──────────────────────────
+    "active_directory": [
+        {
+            "severity": "info",
+            "title_template": "AD: EID 4624 — {username} network logon to {server}",
+            "payload_template": {
+                "EventID": "4624",
+                "Channel": "Security",
+                "Computer": "{server}",
+                "SubjectUserName": "SYSTEM",
+                "SubjectDomainName": "NT AUTHORITY",
+                "SubjectLogonId": "0x3e7",
+                "TargetUserName": "{username}",
+                "TargetDomainName": "{domain}",
+                "TargetLogonId": "0x8dcdc",
+                "LogonType": "3",
+                "LogonProcessName": "Kerberos",
+                "AuthenticationPackageName": "Kerberos",
+                "WorkstationName": "{hostname}",
+                "LogonGuid": "{00000000-0000-0000-0000-000000000000}",
+                "IpAddress": "{src_ip}",
+                "IpPort": "0",
+                "ImpersonationLevel": "Impersonation",
+                "ElevatedToken": "No",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "AD: EID 4768 — Kerberos TGT request for {username}",
+            "payload_template": {
+                "EventID": "4768",
+                "Channel": "Security",
+                "Computer": "{dc}",
+                "TargetUserName": "{username}",
+                "TargetDomainName": "{domain}",
+                "TargetSid": "S-1-5-21-1377283216-344919071-3415362939-1001",
+                "TicketOptions": "0x40810010",
+                "Status": "0x0",
+                "IpAddress": "::ffff:{src_ip}",
+                "IpPort": "54321",
+                "PreAuthType": "18",
+                "LogonGuid": "{00000000-0000-0000-0000-000000000000}",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "AD: EID 4769 — Kerberos service ticket for {username}",
+            "payload_template": {
+                "EventID": "4769",
+                "Channel": "Security",
+                "Computer": "{dc}",
+                "TargetUserName": "{username}@{domain}",
+                "TargetDomainName": "{domain}",
+                "ServiceName": "host",
+                "ServiceSid": "S-1-5-21-1377283216-344919071-3415362939-502",
+                "TicketOptions": "0x40810000",
+                "TicketEncryptionType": "0x12",
+                "IpAddress": "::ffff:{src_ip}",
+                "IpPort": "54322",
+                "Status": "0x0",
+            },
+        },
+        {
+            "severity": "info",
+            "title_template": "AD: EID 4634 — {username} logoff from {server}",
+            "payload_template": {
+                "EventID": "4634",
+                "Channel": "Security",
+                "Computer": "{server}",
+                "TargetUserName": "{username}",
+                "TargetDomainName": "{domain}",
+                "TargetLogonId": "0x8dcdc",
+                "LogonType": "3",
+            },
+        },
+    ],
+
+    # ── Cisco ISE ───────────────────────────────────────────────────────────
+    "cisco_ise": [
+        {
+            "severity": "info",
+            "title_template": "Cisco ISE: RADIUS Auth-Accept — {username} from {hostname}",
+            "payload_template": {
+                "NetworkDeviceName": "core-switch-01",
+                "UserName": "{username}",
+                "NAS-IP-Address": "{server_ip}",
+                "Calling-Station-ID": "{src_ip}",
+                "Framed-IP-Address": "{src_ip}",
+                "AuthenticationMethod": "PEAP",
+                "AuthenticationProtocol": "MSCHAPv2",
+                "AuditSessionID": "0A000001000000EA18B5E3B2",
+                "IsMachineAuthentication": "false",
+                "NetworkDeviceGroups": "All Device Types#Switches",
+                "Response": "Authentication succeeded",
+                "Device.Name": "{hostname}",
+                "Step": "5201 - RADIUS-Access-Accept",
+            },
+        },
+    ],
+}
