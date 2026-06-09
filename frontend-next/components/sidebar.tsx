@@ -28,7 +28,6 @@ import {
   GitBranch,
   Brain,
   Layers,
-  Fingerprint,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -83,7 +82,6 @@ const navGroups: NavGroup[] = [
       { href: "/sessions", label: "Sessions", icon: Activity },
       { href: "/scenarios", label: "Scenarios", icon: BookMarked },
       { href: "/threat-profiles", label: "Threat Profiles", icon: Layers },
-      { href: "/itdr", label: "ITDR Scenarios", icon: Fingerprint },
     ],
   },
   {
@@ -109,7 +107,6 @@ export function Sidebar() {
     detect: true,
     simulate: true,
     intel: true,
-    identity: true,
   })
 
   function toggleGroup(key: string) {

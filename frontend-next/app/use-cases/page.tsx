@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   Search,
   PlayCircle,
@@ -16,6 +17,12 @@ import {
   Clock,
   BarChart3,
   Tag,
+  Fingerprint,
+  ListChecks,
+  Shield,
+  FileSearch,
+  Copy,
+  Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Drawer } from '@/components/ui/Drawer'
@@ -26,6 +33,23 @@ import { AskAboutThis } from '@/components/AskAboutThis'
 
 type UseCaseStatus = 'passed' | 'failed' | 'partial' | 'never' | 'running'
 type Severity = 'critical' | 'high' | 'medium' | 'low'
+
+interface SimStep {
+  step: number
+  action: string
+  detail: string
+  identity_action: string | null
+}
+
+interface SimMetadata {
+  platforms: string[]
+  prerequisites: string[]
+  simulation_steps: SimStep[]
+  expected_logs: string[]
+  detection_sigma: string
+  hunt_query_spl: string
+  hunt_query_kql: string
+}
 type Tactic =
   | 'Initial Access'
   | 'Execution'
@@ -54,6 +78,7 @@ interface UseCase {
   last_run?: string
   created_at: string
   updated_at: string
+  sim_metadata?: SimMetadata | null
 }
 
 interface UseCaseRun {
@@ -338,21 +363,31 @@ interface UseCaseDetailProps {
   onDelete: (id: string) => void
 }
 
+type DetailTab = 'overview' | 'steps' | 'sigma' | 'hunt'
+
 function UseCaseDetailContent({ useCase, onClose, onRun, onDelete }: UseCaseDetailProps) {
   const [detail, setDetail] = useState<UseCaseDetail | null>(null)
   const [runs, setRuns] = useState<UseCaseRun[]>([])
   const [loadingDetail, setLoadingDetail] = useState(true)
   const [running, setRunning] = useState(false)
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+  const [simulating, setSimulating] = useState(false)
+  const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null)
+  const [huntLang, setHuntLang] = useState<'spl' | 'kql'>('spl')
+  const [copied, setCopied] = useState(false)
+
+  const isIdentity = (useCase.tags ?? []).includes('identity')
+  const simMeta = useCase.sim_metadata ?? detail?.sim_metadata
 
   useEffect(() => {
     setLoadingDetail(true)
     Promise.all([
       apiGet<UseCaseDetail>(`/api/v2/use-cases/${useCase.id}`),
-      apiGet<UseCaseRun[]>(`/api/v2/use-cases/${useCase.id}/runs`),
+      apiGet<{ runs: UseCaseRun[] }>(`/api/v2/use-cases/${useCase.id}/runs`),
     ])
       .then(([det, r]) => {
-        setDetail(det)
-        setRuns(r)
+        setDetail(det as UseCaseDetail)
+        setRuns((r as { runs: UseCaseRun[] }).runs ?? [])
       })
       .catch(() => {
         setDetail({ ...SEED_DETAIL, ...useCase })
@@ -370,12 +405,42 @@ function UseCaseDetailContent({ useCase, onClose, onRun, onDelete }: UseCaseDeta
     }
   }
 
+  async function handleSimulateStep(action: string) {
+    setSimulating(true)
+    setSimResult(null)
+    try {
+      const result = await apiPost<Record<string, unknown>>(`/api/v2/use-cases/${useCase.id}/simulate-identity`, {
+        action,
+        reason: 'purple_team_scenario_step',
+        dry_run: false,
+      })
+      setSimResult(result)
+    } catch {
+      setSimResult({ error: 'Simulation failed — check identity sim setup' })
+    } finally {
+      setSimulating(false)
+    }
+  }
+
+  function copyToClipboard(text: string) {
+    void navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   const d = detail ?? useCase
   const lastRun = detail?.last_run_detail
   const passRate =
     lastRun && lastRun.rules_tested > 0
       ? Math.round((lastRun.rules_fired / lastRun.rules_tested) * 100)
       : null
+
+  const tabs: { key: DetailTab; label: string; icon: React.ElementType; show: boolean }[] = [
+    { key: 'overview', label: 'Overview', icon: ClipboardCheck, show: true },
+    { key: 'steps', label: 'Sim Steps', icon: ListChecks, show: !!simMeta },
+    { key: 'sigma', label: 'Sigma', icon: Shield, show: !!simMeta?.detection_sigma },
+    { key: 'hunt', label: 'Hunt Queries', icon: FileSearch, show: !!(simMeta?.hunt_query_spl || simMeta?.hunt_query_kql) },
+  ]
 
   return (
     <div className="p-5 space-y-5">
@@ -405,6 +470,30 @@ function UseCaseDetailContent({ useCase, onClose, onRun, onDelete }: UseCaseDeta
         </button>
       </div>
 
+      {/* Tab bar (only when identity tabs are available) */}
+      {tabs.filter(t => t.show).length > 1 && (
+        <div className="flex gap-0.5 rounded-lg border border-slate-700 bg-slate-900/50 p-0.5">
+          {tabs.filter(t => t.show).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={cn(
+                'flex items-center gap-1.5 flex-1 justify-center rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+                activeTab === key
+                  ? 'bg-violet-600/80 text-white'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── OVERVIEW TAB ── */}
+      {activeTab === 'overview' && (
+        <>
       {/* Metadata */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 space-y-0.5">
@@ -619,6 +708,156 @@ function UseCaseDetailContent({ useCase, onClose, onRun, onDelete }: UseCaseDeta
           Delete Use Case
         </button>
       </div>
+        </>
+      )}
+
+      {/* ── SIMULATION STEPS TAB ── */}
+      {activeTab === 'steps' && simMeta && (
+        <div className="space-y-4">
+          {/* Platforms + Prerequisites */}
+          {simMeta.platforms.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wider font-medium text-slate-500">Platforms</p>
+              <div className="flex flex-wrap gap-1.5">
+                {simMeta.platforms.map(p => (
+                  <span key={p} className="rounded-md border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300 capitalize">{p}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {simMeta.prerequisites.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wider font-medium text-slate-500">Prerequisites</p>
+              <ul className="space-y-0.5">
+                {simMeta.prerequisites.map((p, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-xs text-slate-400">
+                    <span className="text-violet-400 mt-0.5 shrink-0">•</span>{p}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Steps */}
+          <div className="space-y-2">
+            <p className="text-[11px] uppercase tracking-wider font-medium text-slate-500">Simulation Steps</p>
+            {simMeta.simulation_steps.map((step) => (
+              <div key={step.step} className="rounded-lg border border-slate-700 bg-slate-900 p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-600/20 border border-violet-500/30 text-violet-300 text-[10px] font-bold flex items-center justify-center">{step.step}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-slate-200">{step.action}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{step.detail}</p>
+                  </div>
+                </div>
+                {step.identity_action && (
+                  <div className="flex items-center gap-2 ml-7">
+                    <button
+                      onClick={() => void handleSimulateStep(step.identity_action!)}
+                      disabled={simulating}
+                      className="flex items-center gap-1.5 rounded-md bg-violet-600/20 border border-violet-500/30 px-2.5 py-1 text-[11px] text-violet-300 hover:bg-violet-600/30 disabled:opacity-50 transition-colors"
+                    >
+                      {simulating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                      Simulate: {step.identity_action.replace(/_/g, ' ')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Sim result */}
+          {simResult && (
+            <div className={cn(
+              'rounded-lg border p-3 text-xs',
+              (simResult as Record<string,unknown>).error
+                ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                : 'border-green-500/30 bg-green-500/10 text-green-300'
+            )}>
+              {(simResult as Record<string,unknown>).error
+                ? String((simResult as Record<string,unknown>).error)
+                : `✓ ${(simResult as Record<string,unknown>).message || 'Action completed'}`}
+            </div>
+          )}
+
+          {/* Expected Logs */}
+          {simMeta.expected_logs.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wider font-medium text-slate-500">Expected Log Events</p>
+              <div className="space-y-1">
+                {simMeta.expected_logs.map((log, i) => (
+                  <div key={i} className="flex items-start gap-2 rounded-md border border-slate-700 bg-slate-900/50 px-2.5 py-1.5">
+                    <span className="text-blue-400 shrink-0 mt-0.5 text-[10px]">LOG</span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">{log}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── SIGMA TAB ── */}
+      {activeTab === 'sigma' && simMeta?.detection_sigma && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-wider font-medium text-slate-500">Sigma Detection Rule</p>
+            <button
+              onClick={() => copyToClipboard(simMeta.detection_sigma)}
+              className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <Copy className="h-3 w-3" />
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <pre className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">{simMeta.detection_sigma.trim()}</pre>
+          <p className="text-[10px] text-slate-600">This rule is auto-seeded into Sigma Library. Deploy from <a href="/sigma-library" className="text-violet-400 hover:underline">Sigma Library</a>.</p>
+        </div>
+      )}
+
+      {/* ── HUNT QUERIES TAB ── */}
+      {activeTab === 'hunt' && simMeta && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-0.5 w-fit">
+            {(['spl', 'kql'] as const).filter(lang => simMeta[`hunt_query_${lang}` as keyof SimMetadata]).map(lang => (
+              <button
+                key={lang}
+                onClick={() => setHuntLang(lang)}
+                className={cn(
+                  'rounded-md px-3 py-1 text-xs font-medium uppercase transition-colors',
+                  huntLang === lang
+                    ? 'bg-slate-700 text-slate-200'
+                    : 'text-slate-500 hover:text-slate-300'
+                )}
+              >
+                {lang}
+              </button>
+            ))}
+          </div>
+          {huntLang === 'spl' && simMeta.hunt_query_spl && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">Splunk SPL</span>
+                <button onClick={() => copyToClipboard(simMeta.hunt_query_spl)} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
+                  <Copy className="h-3 w-3" />{copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <pre className="rounded-lg border border-orange-500/20 bg-slate-950 p-3 text-[11px] font-mono text-orange-300/90 overflow-x-auto whitespace-pre-wrap">{simMeta.hunt_query_spl}</pre>
+            </div>
+          )}
+          {huntLang === 'kql' && simMeta.hunt_query_kql && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">Microsoft KQL (Sentinel/Defender)</span>
+                <button onClick={() => copyToClipboard(simMeta.hunt_query_kql)} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
+                  <Copy className="h-3 w-3" />{copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <pre className="rounded-lg border border-blue-500/20 bg-slate-950 p-3 text-[11px] font-mono text-blue-300/90 overflow-x-auto whitespace-pre-wrap">{simMeta.hunt_query_kql}</pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -934,7 +1173,8 @@ function NewUseCaseForm({ onClose, onCreated }: NewUseCaseFormProps) {
 
 const ALL_TACTICS = ['All', ...TACTICS]
 
-export default function UseCasesPage() {
+function UseCasesPageInner() {
+  const searchParams = useSearchParams()
   const [useCases, setUseCases] = useState<UseCase[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -943,6 +1183,7 @@ export default function UseCasesPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<UseCaseStatus | 'all'>('all')
   const [tacticFilter, setTacticFilter] = useState('All')
+  const [identityFilter, setIdentityFilter] = useState(searchParams?.get('identity') === '1')
 
   // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -1007,6 +1248,7 @@ export default function UseCasesPage() {
     if (search && !uc.name.toLowerCase().includes(search.toLowerCase())) return false
     if (statusFilter !== 'all' && uc.status !== statusFilter) return false
     if (tacticFilter !== 'All' && uc.tactic !== tacticFilter) return false
+    if (identityFilter && !(uc.tags ?? []).includes('identity')) return false
     return true
   })
 
@@ -1208,6 +1450,20 @@ export default function UseCasesPage() {
             </select>
             <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
           </div>
+
+          {/* Identity filter */}
+          <button
+            onClick={() => setIdentityFilter(v => !v)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              identityFilter
+                ? 'border-violet-500/50 bg-violet-500/20 text-violet-300'
+                : 'border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <Fingerprint className="h-3.5 w-3.5" />
+            Identity
+          </button>
         </div>
 
         {/* Bulk actions bar */}
@@ -1329,6 +1585,11 @@ export default function UseCasesPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm text-slate-200 font-medium">{uc.name}</span>
+                      {(uc.tags ?? []).includes('identity') && (
+                        <span className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-violet-500/10 border border-violet-500/30 px-1.5 py-0.5 text-[10px] text-violet-400">
+                          <Fingerprint className="h-2.5 w-2.5" />IAM
+                        </span>
+                      )}
                       {!uc.active && (
                         <span className="shrink-0 rounded-md bg-slate-800 border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-500">
                           inactive
@@ -1436,5 +1697,13 @@ export default function UseCasesPage() {
         </div>
       )}
     </>
+  )
+}
+
+export default function UseCasesPage() {
+  return (
+    <Suspense>
+      <UseCasesPageInner />
+    </Suspense>
   )
 }

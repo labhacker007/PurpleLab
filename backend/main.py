@@ -177,6 +177,16 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.warning("Use case seeding skipped: %s", exc)
 
+    # 7b. Seed identity Sigma rules from use case library
+    try:
+        from backend.use_cases.service import UseCaseService
+        svc = UseCaseService()
+        sigma_seeded = await svc.seed_identity_sigma_rules()
+        if sigma_seeded:
+            logger.info("Seeded %d identity Sigma rules into library", sigma_seeded)
+    except Exception as exc:
+        logger.warning("Identity Sigma rule seeding skipped: %s", exc)
+
     # 8. Auto-create superadmin if FIRST_SUPERADMIN_EMAIL is set
     if settings.FIRST_SUPERADMIN_EMAIL and settings.FIRST_SUPERADMIN_PASSWORD:
         try:

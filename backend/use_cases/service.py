@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,7 @@ def _uc_to_dict(uc: models.UseCase) -> dict[str, Any]:
         "last_validated_at": uc.last_validated_at.isoformat() if uc.last_validated_at else None,
         "created_at": uc.created_at.isoformat() if uc.created_at else None,
         "updated_at": uc.updated_at.isoformat() if uc.updated_at else None,
+        "sim_metadata": uc.sim_metadata or None,
     }
 
 
@@ -65,6 +67,7 @@ class UseCaseService:
         active_only: bool = False,
         tactic: str | None = None,
         severity: str | None = None,
+        tag: str | None = None,
         search: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -77,6 +80,8 @@ class UseCaseService:
                 q = q.where(models.UseCase.tactic == tactic)
             if severity:
                 q = q.where(models.UseCase.severity == severity)
+            if tag:
+                q = q.where(models.UseCase.tags.cast(sa.Text).ilike(f'%"{tag}"%'))
             if search:
                 like = f"%{search}%"
                 q = q.where(
@@ -124,6 +129,7 @@ class UseCaseService:
                 tags=data.get("tags", []),
                 is_active=data.get("is_active", True),
                 is_builtin=data.get("is_builtin", False),
+                sim_metadata=data.get("sim_metadata"),
             )
             db.add(uc)
             await db.commit()
@@ -190,9 +196,68 @@ class UseCaseService:
                     tags=uc_data.get("tags", []),
                     is_active=True,
                     is_builtin=True,
+                    sim_metadata=uc_data.get("sim_metadata"),
                 )
                 db.add(uc)
                 inserted += 1
+            if inserted:
+                await db.commit()
+
+        return inserted
+
+    async def seed_identity_sigma_rules(self) -> int:
+        """Seed Sigma detection rules from identity use cases into SigmaLibraryRule.
+
+        Uses SHA-256 dedup so re-seeding is safe. Returns count of newly inserted rules.
+        """
+        import hashlib
+        from backend.use_cases.library import BUILTIN_USE_CASES
+
+        inserted = 0
+        async with async_session() as db:
+            for uc_data in BUILTIN_USE_CASES:
+                meta = uc_data.get("sim_metadata")
+                if not meta:
+                    continue
+                sigma_yaml = meta.get("detection_sigma", "").strip()
+                if not sigma_yaml:
+                    continue
+
+                sha = hashlib.sha256(sigma_yaml.encode()).hexdigest()
+                existing = await db.scalar(
+                    select(models.SigmaLibraryRule).where(models.SigmaLibraryRule.sha256 == sha)
+                )
+                if existing:
+                    continue
+
+                title = uc_data["name"]
+                tags_list = uc_data.get("tags", [])
+                technique_ids = uc_data.get("technique_ids", [])
+
+                # Map severity
+                severity = uc_data.get("severity", "medium")
+                level_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low"}
+                level = level_map.get(severity, "medium")
+
+                rule = models.SigmaLibraryRule(
+                    source_id=None,
+                    title=title,
+                    description=uc_data.get("description", ""),
+                    rule_yaml=sigma_yaml,
+                    status="stable",
+                    level=level,
+                    category="identity",
+                    product="windows" if "windows" in uc_data.get("expected_log_sources", []) else None,
+                    service="security",
+                    technique_ids=technique_ids,
+                    tags=tags_list,
+                    file_path=None,
+                    sha256=sha,
+                    added_by="purplelab-identity-seed",
+                )
+                db.add(rule)
+                inserted += 1
+
             if inserted:
                 await db.commit()
 

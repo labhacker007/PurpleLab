@@ -187,4 +187,541 @@ BUILTIN_USE_CASES: list[dict[str, Any]] = [
     {"name": "Living-off-the-Land Binary Execution Chain", "description": "Chain of LOLBin executions indicating attack tooling.", "technique_ids": ["T1218"], "tactic": "defense-evasion", "expected_log_sources": ["sysmon", "windows_security"], "severity": "high", "tags": ["lolbin", "chain"]},
     {"name": "Security Tool Termination", "description": "EDR, AV, or SIEM agent process terminated abnormally.", "technique_ids": ["T1562.001"], "tactic": "defense-evasion", "expected_log_sources": ["crowdstrike", "sysmon"], "severity": "critical", "tags": ["edr-kill", "security-tool"]},
     {"name": "Suspicious Script Block Logging", "description": "PowerShell script block with obfuscated or encoded suspicious content.", "technique_ids": ["T1059.001", "T1027"], "tactic": "execution", "expected_log_sources": ["windows_powershell"], "severity": "high", "tags": ["powershell", "obfuscation"]},
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # IDENTITY & ACCESS (TA0006 + TA0004 identity sub-techniques)
+    # Full simulation metadata — steps, sigma, SPL, KQL
+    # ════════════════════════════════════════════════════════════════════════════
+    {
+        "name": "Kerberoasting — Service Ticket Extraction",
+        "description": "Attacker requests Kerberos service tickets for SPN-registered accounts, then cracks them offline to obtain plaintext passwords of service accounts.",
+        "technique_ids": ["T1558.003"],
+        "tactic": "credential-access",
+        "expected_log_sources": ["windows_security", "active_directory"],
+        "severity": "high",
+        "tags": ["identity", "iam", "kerberos", "credential-access", "active-directory"],
+        "sim_metadata": {
+            "platforms": ["windows", "active_directory"],
+            "prerequisites": ["Domain-joined Windows host", "Service accounts with weak passwords", "Active Directory environment"],
+            "simulation_steps": [
+                {"step": 1, "action": "Enumerate SPNs", "detail": "Run `Get-ADUser -Filter {ServicePrincipalName -ne '$null'} -Properties ServicePrincipalName` to list all SPN accounts.", "identity_action": None},
+                {"step": 2, "action": "Request service tickets", "detail": "Use Rubeus or Impacket GetUserSPNs.py to request AS_REP tickets for each SPN. Event ID 4769 (Kerberos Service Ticket Operations) fires for each request.", "identity_action": None},
+                {"step": 3, "action": "Export ticket hashes", "detail": "Rubeus outputs RC4-HMAC hashes. Save to file for offline cracking.", "identity_action": None},
+                {"step": 4, "action": "Offline password cracking", "detail": "Run hashcat with rockyou.txt: `hashcat -m 13100 hashes.txt wordlist.txt`", "identity_action": None},
+                {"step": 5, "action": "Validate cracked credential", "detail": "Authenticate with recovered password. Use `lock_user` action against svc account to simulate containment.", "identity_action": "lock_user"},
+            ],
+            "expected_logs": [
+                "Windows Security Event ID 4769 — Kerberos Service Ticket Operations (TicketEncryptionType=0x17 RC4-HMAC)",
+                "Multiple 4769 events from same source IP in short time window",
+                "Target accounts are service accounts (SPN registered)",
+                "Logon Type 3 (network) from non-standard workstation",
+            ],
+            "detection_sigma": """title: Kerberoasting — Anomalous Service Ticket Requests
+id: kerberoast-rc4-bulk
+status: stable
+description: Detects bulk Kerberos service ticket requests with RC4 encryption indicative of Kerberoasting
+references:
+  - https://attack.mitre.org/techniques/T1558/003/
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.credential_access
+  - attack.t1558.003
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4769
+    TicketEncryptionType: '0x17'
+    ServiceName|endswith:
+      - '$'
+  filter_krbtgt:
+    ServiceName: 'krbtgt'
+  timeframe: 5m
+  condition: selection and not filter_krbtgt | count(ServiceName) by SourceAddress > 5
+falsepositives:
+  - Legacy applications requiring RC4
+level: high
+""",
+            "hunt_query_spl": "index=wineventlog EventCode=4769 TicketEncryptionType=0x17 NOT ServiceName=krbtgt | stats count by SourceAddress, ServiceName | where count > 3 | sort -count",
+            "hunt_query_kql": "SecurityEvent | where EventID == 4769 and TicketEncryptionType == \"0x17\" and ServiceName != \"krbtgt\" | summarize RequestCount=count() by IpAddress, ServiceName | where RequestCount > 3 | order by RequestCount desc",
+        },
+    },
+    {
+        "name": "Pass-the-Hash — Lateral Movement via NTLM",
+        "description": "Attacker uses a captured NTLM password hash to authenticate to remote systems without knowing the plaintext password.",
+        "technique_ids": ["T1550.002"],
+        "tactic": "lateral-movement",
+        "expected_log_sources": ["windows_security", "active_directory"],
+        "severity": "critical",
+        "tags": ["identity", "iam", "ntlm", "lateral-movement", "windows"],
+        "sim_metadata": {
+            "platforms": ["windows"],
+            "prerequisites": ["NTLM hash obtained (via Mimikatz/secretsdump)", "Target system with SMB/WMI open", "Local admin on target"],
+            "simulation_steps": [
+                {"step": 1, "action": "Dump NTLM hash", "detail": "Run `sekurlsa::logonpasswords` in Mimikatz or use secretsdump.py to extract NTLM hashes from memory.", "identity_action": None},
+                {"step": 2, "action": "Craft PTH session", "detail": "Use `pth-winexe` or Impacket's wmiexec.py: `wmiexec.py -hashes :NTLMhash Administrator@target`", "identity_action": None},
+                {"step": 3, "action": "Execute remote command", "detail": "Run `whoami /all` and `net group 'Domain Admins' /domain` on target to verify privilege level.", "identity_action": None},
+                {"step": 4, "action": "Lateral movement to DC", "detail": "Chain PTH to reach Domain Controller. Triggers 4624 LogonType=3 with anomalous source workstation.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Lock the compromised account via identity_sim to stop PTH chain propagation.", "identity_action": "lock_user"},
+            ],
+            "expected_logs": [
+                "Windows Security Event ID 4624 — Logon Type 3 (Network) with NTLM authentication",
+                "Event ID 4625 followed by 4624 from same source (hash replay)",
+                "No corresponding Kerberos ticket events from same session",
+                "New logon from workstation that doesn't normally access target",
+            ],
+            "detection_sigma": """title: Pass-the-Hash — NTLM Network Logon Anomaly
+id: pth-ntlm-network-logon
+status: stable
+description: Detects Pass-the-Hash indicators — NTLM Type 3 network logon from non-standard workstation
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.lateral_movement
+  - attack.t1550.002
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4624
+    LogonType: 3
+    AuthenticationPackageName: NTLM
+    LogonProcessName: NtLmSsp
+  filter_local:
+    SubjectUserName|endswith: '$'
+  condition: selection and not filter_local
+falsepositives:
+  - Legacy applications using NTLM over network
+  - Workgroup environments without Kerberos
+level: high
+""",
+            "hunt_query_spl": "index=wineventlog EventCode=4624 Logon_Type=3 Authentication_Package=NTLM NOT Account_Name=\"*$\" | stats count by Source_Network_Address, Account_Name | where count > 2 | sort -count",
+            "hunt_query_kql": "SecurityEvent | where EventID == 4624 and LogonType == 3 and AuthenticationPackageName == \"NTLM\" and AccountName !endswith \"$\" | summarize count() by IpAddress, AccountName | where count_ > 2",
+        },
+    },
+    {
+        "name": "Golden Ticket Attack — Forged Kerberos TGT",
+        "description": "Attacker forges a Kerberos TGT using the KRBTGT account hash, granting persistent domain admin access without touching AD directly.",
+        "technique_ids": ["T1558.001"],
+        "tactic": "privilege-escalation",
+        "expected_log_sources": ["windows_security", "active_directory"],
+        "severity": "critical",
+        "tags": ["identity", "iam", "kerberos", "golden-ticket", "domain-persistence"],
+        "sim_metadata": {
+            "platforms": ["windows", "active_directory"],
+            "prerequisites": ["KRBTGT account hash (from DCSync)", "Domain SID", "Mimikatz or Rubeus"],
+            "simulation_steps": [
+                {"step": 1, "action": "Obtain KRBTGT hash", "detail": "Run DCSync or extract from NTDS.dit: `lsadump::dcsync /user:krbtgt`", "identity_action": None},
+                {"step": 2, "action": "Forge Golden Ticket", "detail": "Mimikatz: `kerberos::golden /user:Administrator /domain:corp.local /sid:S-1-5-21-... /krbtgt:<hash> /ptt`", "identity_action": None},
+                {"step": 3, "action": "Verify TGT injection", "detail": "Run `klist` to confirm ticket in memory. Access DC: `dir \\\\DC01\\C$`", "identity_action": None},
+                {"step": 4, "action": "Persist with extended ticket", "detail": "Create ticket with 10-year lifetime to survive password resets. Event 4768 fires with anomalous ticket lifetime.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Force MFA re-enrollment and session revocation for all admin accounts.", "identity_action": "force_mfa"},
+            ],
+            "expected_logs": [
+                "Event ID 4768 — TGT requested with unusually long ticket lifetime (>10h)",
+                "Event ID 4769 — Service ticket from forged TGT has no corresponding 4768",
+                "Event ID 4672 — Special privileges assigned without preceding 4624 domain logon",
+                "Logon from non-existent user (golden ticket allows forging any username)",
+            ],
+            "detection_sigma": """title: Golden Ticket — Anomalous TGT Lifetime
+id: golden-ticket-tgt-lifetime
+status: experimental
+description: Detects forged Golden Tickets via anomalous TGT lifetimes in Kerberos authentication events
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.privilege_escalation
+  - attack.t1558.001
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_tgt:
+    EventID: 4768
+    Status: '0x0'
+  selection_service:
+    EventID: 4769
+  timeframe: 1m
+  condition: selection_service and not selection_tgt within 5m
+falsepositives:
+  - Service accounts with cached tickets
+level: critical
+""",
+            "hunt_query_spl": "index=wineventlog EventCode=4768 | eval ticket_age=strptime(Ticket_Options, \"%Y-%m-%d\") | where Ticket_Options LIKE \"%forwardable%\" | stats count by Account_Name, Client_Address",
+            "hunt_query_kql": "SecurityEvent | where EventID == 4769 | join kind=leftanti (SecurityEvent | where EventID == 4768) on AccountName, IpAddress | project TimeGenerated, AccountName, IpAddress, ServiceName",
+        },
+    },
+    {
+        "name": "DCSync Attack — Credential Replication from DC",
+        "description": "Attacker abuses Directory Replication Service (DRS) protocol to dump all password hashes from the Domain Controller as if it were a replicating DC.",
+        "technique_ids": ["T1003.006"],
+        "tactic": "credential-access",
+        "expected_log_sources": ["active_directory", "windows_security"],
+        "severity": "critical",
+        "tags": ["identity", "iam", "dcsync", "active-directory", "domain-admin"],
+        "sim_metadata": {
+            "platforms": ["windows", "active_directory"],
+            "prerequisites": ["Domain Admin or Replication rights", "Network access to Domain Controller"],
+            "simulation_steps": [
+                {"step": 1, "action": "Check replication rights", "detail": "Verify account has `DS-Replication-Get-Changes` and `DS-Replication-Get-Changes-All` ACE on domain NC.", "identity_action": None},
+                {"step": 2, "action": "Execute DCSync for admin hashes", "detail": "Mimikatz: `lsadump::dcsync /domain:corp.local /user:Administrator`. Fires Event ID 4662.", "identity_action": None},
+                {"step": 3, "action": "Dump KRBTGT hash", "detail": "Mimikatz: `lsadump::dcsync /user:krbtgt` — enables Golden Ticket creation.", "identity_action": None},
+                {"step": 4, "action": "Verify no LSASS access required", "detail": "Confirm no Event 4688 (process create) on DC — DCSync is purely network-based DRS replication.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Immediately revoke sessions for all domain admin accounts and force password resets.", "identity_action": "revoke_sessions"},
+            ],
+            "expected_logs": [
+                "Event ID 4662 — An operation was performed on an object (replication GUIDs: 1131f6aa, 1131f6ad)",
+                "Event ID 4624 — Logon from non-DC machine using domain admin account",
+                "Unusual volume of 4662 events from a non-DC source",
+                "Netlogon debug logs showing DRS bind from non-DC computer",
+            ],
+            "detection_sigma": """title: DCSync Attack — Suspicious Directory Replication
+id: dcsync-replication-rights
+status: stable
+description: Detects DCSync by monitoring for suspicious directory replication operations from non-DC machines
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.credential_access
+  - attack.t1003.006
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4662
+    Properties|contains:
+      - '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'
+      - '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2'
+      - '89e95b76-444d-4c62-991a-0facbeda640c'
+  filter_dc:
+    SubjectUserName|endswith: '$'
+  condition: selection and not filter_dc
+falsepositives:
+  - Legitimate AD replication between domain controllers
+  - Azure AD Connect sync account
+level: critical
+""",
+            "hunt_query_spl": "index=wineventlog EventCode=4662 Properties=\"*1131f6aa*\" OR Properties=\"*1131f6ad*\" | where NOT match(Subject_Account_Name, \"\\$\") | stats count by Subject_Account_Name, src_ip",
+            "hunt_query_kql": "SecurityEvent | where EventID == 4662 and Properties has_any (\"1131f6aa\", \"1131f6ad\", \"89e95b76\") and SubjectUserName !endswith \"$\" | summarize count() by SubjectUserName, IpAddress, bin(TimeGenerated, 1h)",
+        },
+    },
+    {
+        "name": "MFA Fatigue Attack — Push Notification Bombing",
+        "description": "Attacker floods a user's phone with MFA push notifications, exploiting approval fatigue until the user approves to stop the interruptions.",
+        "technique_ids": ["T1621"],
+        "tactic": "credential-access",
+        "expected_log_sources": ["okta", "azure_ad", "entra_id"],
+        "severity": "high",
+        "tags": ["identity", "iam", "mfa-bypass", "okta", "entra-id", "cloud"],
+        "sim_metadata": {
+            "platforms": ["cloud", "saas"],
+            "prerequisites": ["Valid username and password (from phishing/spray)", "Okta/Entra MFA policy using push notifications"],
+            "simulation_steps": [
+                {"step": 1, "action": "Obtain valid credentials", "detail": "Use captured credentials from phishing or password spray. Login attempt fails at MFA step.", "identity_action": None},
+                {"step": 2, "action": "Initiate push flood", "detail": "Automate repeated MFA challenge attempts every 10-30 seconds. Okta logs `system.mfa.auth.soft_lock` after N attempts.", "identity_action": None},
+                {"step": 3, "action": "Wait for user approval", "detail": "After 20-50 push notifications, fatigued user approves. Okta logs `user.authentication.sso` with `factor=push`.", "identity_action": None},
+                {"step": 4, "action": "Establish persistent session", "detail": "Create long-lived session cookie. Register new trusted device to enable future MFA bypass.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Force MFA re-enrollment, revoke all active sessions, block push MFA, require number matching.", "identity_action": "force_mfa"},
+            ],
+            "expected_logs": [
+                "Okta: Multiple `system.mfa.auth.challenge.generated` events within 5 minutes for same user",
+                "Okta: `user.session.start` from IP with no prior history for this user",
+                "Entra: Multiple MFA denials followed by approval within short window",
+                "Source IP geolocation mismatch with user's registered device",
+            ],
+            "detection_sigma": """title: MFA Fatigue — Repeated Push Notification Denials
+id: mfa-fatigue-push-bomb
+status: stable
+description: Detects MFA fatigue attack pattern — multiple rapid MFA challenges followed by success
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.credential_access
+  - attack.t1621
+logsource:
+  product: okta
+  service: system
+detection:
+  selection_fail:
+    eventType: 'system.mfa.auth.soft_lock'
+  selection_success:
+    eventType: 'user.authentication.sso'
+    authenticationContext.credentialType: 'push'
+  timeframe: 10m
+  condition: selection_fail | count() by actor.login > 3
+falsepositives:
+  - Users who accidentally tap deny multiple times
+level: high
+""",
+            "hunt_query_spl": "index=okta eventType=system.mfa.auth* | bucket _time span=5m | stats count by actor.login, _time | where count > 5 | join actor.login [search index=okta eventType=user.authentication.sso authContext.credentialType=push]",
+            "hunt_query_kql": "AADNonInteractiveUserSignInLogs | where ResultType != 0 and AuthenticationRequirement == \"multiFactorAuthentication\" | summarize FailCount=count() by UserPrincipalName, IPAddress, bin(TimeGenerated, 5m) | where FailCount > 5 | join kind=inner (AADSignInLogs | where ResultType == 0) on UserPrincipalName",
+        },
+    },
+    {
+        "name": "Impossible Travel — Geographic Anomaly Login",
+        "description": "User account logs in from two geographically separated locations within a time window that makes physical travel impossible.",
+        "technique_ids": ["T1078.004"],
+        "tactic": "initial-access",
+        "expected_log_sources": ["okta", "azure_ad", "vpn"],
+        "severity": "high",
+        "tags": ["identity", "iam", "impossible-travel", "cloud", "account-takeover", "ueba"],
+        "sim_metadata": {
+            "platforms": ["cloud", "saas"],
+            "prerequisites": ["Compromised cloud account credentials", "VPN or proxy to create geographic anomaly"],
+            "simulation_steps": [
+                {"step": 1, "action": "Normal user login", "detail": "User authenticates from home IP (US-East). Establish baseline location from identity_sim user record.", "identity_action": None},
+                {"step": 2, "action": "Attacker login from different continent", "detail": "Authenticate from IP resolving to Eastern Europe within 30 minutes of prior US login. Distance ~9000km, requires >9h travel.", "identity_action": None},
+                {"step": 3, "action": "Access sensitive resources", "detail": "Access HR portal, SharePoint, or email from the impossible-travel session.", "identity_action": None},
+                {"step": 4, "action": "Persist via new device registration", "detail": "Register a new trusted device to the account to maintain access after password reset.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Immediately lock account, revoke all sessions globally, force password reset and MFA re-enrollment.", "identity_action": "lock_user"},
+            ],
+            "expected_logs": [
+                "Okta/Entra: Two successful logons from IPs 9000+ km apart within 60 minutes",
+                "Login from country with no prior login history for this account",
+                "Access to high-privilege resources from anomalous geographic location",
+                "No VPN connected at time of anomalous login",
+            ],
+            "detection_sigma": """title: Impossible Travel — Anomalous Geographic Authentication
+id: impossible-travel-auth
+status: stable
+description: Detects successful logins from geographically impossible source IP pairs within a short time window
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.initial_access
+  - attack.t1078.004
+logsource:
+  product: azure
+  service: signinlogs
+detection:
+  selection:
+    ResultType: 0
+    RiskLevelAggregated:
+      - medium
+      - high
+    RiskDetail: 'impossibleTravel'
+  condition: selection
+falsepositives:
+  - VPN users with exit nodes in different countries
+  - Traveling employees
+level: high
+""",
+            "hunt_query_spl": "index=okta eventType=user.session.start | iplocation client.ipAddress | eval login_country=Country | stats list(login_country) as countries, list(_time) as times by actor.login | where mvcount(countries) > 1 | eval time_diff=abs(mvindex(times,0)-mvindex(times,1))/3600",
+            "hunt_query_kql": "SigninLogs | where ResultType == 0 | extend GeoInfo = parse_json(LocationDetails) | summarize Locations=make_set(GeoInfo.countryOrRegion), FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated) by UserPrincipalName | where array_length(Locations) > 1 and datetime_diff('hour', LastSeen, FirstSeen) < 2",
+        },
+    },
+    {
+        "name": "Password Spray — Distributed Authentication Attack",
+        "description": "Attacker tries a single common password (e.g., 'Welcome1') against hundreds of accounts to avoid lockout thresholds while still finding weak credentials.",
+        "technique_ids": ["T1110.003"],
+        "tactic": "credential-access",
+        "expected_log_sources": ["okta", "azure_ad", "windows_security"],
+        "severity": "high",
+        "tags": ["identity", "iam", "password-spray", "credential-access"],
+        "sim_metadata": {
+            "platforms": ["windows", "cloud", "active_directory"],
+            "prerequisites": ["Username list (harvested from LinkedIn/OSINT)", "Single candidate password", "Rate limiting not configured"],
+            "simulation_steps": [
+                {"step": 1, "action": "Harvest username list", "detail": "Collect usernames from LinkedIn, email format guessing, or Azure AD user enumeration via timing attack on login endpoint.", "identity_action": None},
+                {"step": 2, "action": "Spray first password", "detail": "Submit `Welcome1` for all 200 usernames over 20 minutes (1 req/6s to avoid lockout). Generates mass 4625 events.", "identity_action": None},
+                {"step": 3, "action": "Wait and spray again", "detail": "Wait 30 minutes. Spray `Company2024!`. Avoid same-account lockout by spreading attempts over time.", "identity_action": None},
+                {"step": 4, "action": "Identify valid credentials", "detail": "Monitor for 4624 success after repeated 4625 failures from same source IP.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Disable compromised accounts, force password resets, enable lockout policy.", "identity_action": "disable_user"},
+            ],
+            "expected_logs": [
+                "Event ID 4625 — Failed logons across many different accounts from same source IP",
+                "Low failure count per account (1-2) but high total failure count from single source",
+                "Spike in authentication failures across entire tenant at same timestamp",
+                "Eventual 4624 success for one account from same source IP",
+            ],
+            "detection_sigma": """title: Password Spray — Distributed Authentication Failures
+id: password-spray-many-accounts
+status: stable
+description: Detects password spray by identifying one source IP with failures across many distinct accounts
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.credential_access
+  - attack.t1110.003
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4625
+  timeframe: 15m
+  condition: selection | count(TargetUserName) by IpAddress > 20
+falsepositives:
+  - Network scanners
+  - Load balancers with shared source IP
+level: high
+""",
+            "hunt_query_spl": "index=wineventlog EventCode=4625 | bucket _time span=15m | stats dc(Account_Name) as unique_accounts, count as total_failures by Source_Network_Address, _time | where unique_accounts > 15 | sort -unique_accounts",
+            "hunt_query_kql": "SecurityEvent | where EventID == 4625 | summarize UniqueAccounts=dcount(TargetUserName), TotalFailures=count() by IpAddress, bin(TimeGenerated, 15m) | where UniqueAccounts > 15 | order by UniqueAccounts desc",
+        },
+    },
+    {
+        "name": "OAuth Consent Phishing — Malicious App Authorization",
+        "description": "Attacker tricks a user into granting OAuth permissions to a malicious third-party app, enabling persistent access to email, files, and contacts without knowing the user's password.",
+        "technique_ids": ["T1550.001", "T1566.002"],
+        "tactic": "initial-access",
+        "expected_log_sources": ["azure_ad", "okta", "microsoft_365"],
+        "severity": "high",
+        "tags": ["identity", "iam", "oauth", "consent-phishing", "cloud", "m365"],
+        "sim_metadata": {
+            "platforms": ["cloud", "saas", "microsoft_365"],
+            "prerequisites": ["Azure AD / Microsoft 365 tenant", "Registered malicious OAuth app", "User with email access"],
+            "simulation_steps": [
+                {"step": 1, "action": "Register malicious OAuth app", "detail": "Register an Azure AD app requesting `Mail.Read`, `Files.ReadWrite.All`, `offline_access` permissions.", "identity_action": None},
+                {"step": 2, "action": "Send consent phishing email", "detail": "Send email with link: `https://login.microsoftonline.com/common/oauth2/authorize?client_id=<evil-app>&scope=Mail.Read+Files.ReadWrite.All`", "identity_action": None},
+                {"step": 3, "action": "User grants consent", "detail": "User clicks link, authenticates, and grants permissions. Azure AD logs `Consent to application` operation.", "identity_action": None},
+                {"step": 4, "action": "Access data with access token", "detail": "Attacker uses refresh token to access mailbox via Graph API: `GET /v1.0/me/messages`. No MFA required.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Revoke all OAuth tokens for the user, remove malicious app permission, force MFA.", "identity_action": "revoke_sessions"},
+            ],
+            "expected_logs": [
+                "Azure AD Audit: `Consent to application` by user for app requesting high-privilege permissions",
+                "Azure AD Sign-in: Service principal authentication with `client_credentials` flow",
+                "M365 Audit: Mail access via Graph API from unusual application ID",
+                "App registration created by external entity (non-admin)",
+            ],
+            "detection_sigma": """title: OAuth Consent Phishing — High-Privilege App Consent
+id: oauth-consent-high-privilege
+status: experimental
+description: Detects users granting OAuth consent to apps requesting high-privilege delegated permissions
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.initial_access
+  - attack.t1550.001
+logsource:
+  product: azure
+  service: auditlogs
+detection:
+  selection:
+    OperationName: 'Consent to application'
+    TargetResources|contains:
+      - 'Mail.Read'
+      - 'Files.ReadWrite.All'
+      - 'Mail.ReadWrite'
+      - 'offline_access'
+  condition: selection
+falsepositives:
+  - Legitimate enterprise app onboarding
+  - Admin-approved enterprise applications
+level: high
+""",
+            "hunt_query_spl": "index=azure_ad operationName=\"Consent to application\" | spath modifiedProperties{}.newValue | mvexpand modifiedProperties{}.newValue | search \"Mail.Read\" OR \"Files.ReadWrite\" | stats count by userPrincipalName, appDisplayName, ipAddress",
+            "hunt_query_kql": "AuditLogs | where OperationName == 'Consent to application' | extend AppName=tostring(TargetResources[0].displayName), Scopes=tostring(AdditionalDetails) | where Scopes has_any ('Mail.Read', 'Files.ReadWrite.All', 'offline_access') | project TimeGenerated, InitiatedBy, AppName, Scopes",
+        },
+    },
+    {
+        "name": "Privileged Account Enumeration — AD Reconnaissance",
+        "description": "Attacker enumerates Active Directory for Domain Admins, Tier 0 accounts, and privileged groups to identify high-value targets for credential theft.",
+        "technique_ids": ["T1087.002"],
+        "tactic": "discovery",
+        "expected_log_sources": ["active_directory", "windows_security"],
+        "severity": "medium",
+        "tags": ["identity", "iam", "enumeration", "active-directory", "reconnaissance"],
+        "sim_metadata": {
+            "platforms": ["windows", "active_directory"],
+            "prerequisites": ["Valid domain credentials", "Domain-joined or network-accessible host"],
+            "simulation_steps": [
+                {"step": 1, "action": "Enumerate Domain Admins", "detail": "Run `net group 'Domain Admins' /domain` and `Get-ADGroupMember -Identity 'Domain Admins'`. Generates LDAP query events.", "identity_action": None},
+                {"step": 2, "action": "Enumerate Tier 0 accounts", "detail": "Query LDAP for adminCount=1 accounts: `Get-ADUser -LDAPFilter '(adminCount=1)' -Properties *`. Identifies accounts with ACL inheritance blocked.", "identity_action": None},
+                {"step": 3, "action": "Map privileged group memberships", "detail": "Enumerate Schema Admins, Enterprise Admins, Backup Operators, Account Operators. Use BloodHound for full privilege graph.", "identity_action": None},
+                {"step": 4, "action": "Identify service accounts with high privileges", "detail": "Query SPN accounts with Domain Admin membership — prime Kerberoasting targets.", "identity_action": None},
+                {"step": 5, "action": "Simulate lock of enumerated account", "detail": "Lock one of the identified privileged accounts to test detection response time.", "identity_action": "lock_user"},
+            ],
+            "expected_logs": [
+                "Event ID 4661 — A handle to an object was requested (AD privileged object access)",
+                "LDAP queries for adminCount=1 or group membership from non-admin workstation",
+                "Event ID 4799 — Security-enabled local group membership enumeration",
+                "BloodHound/SharpHound markers: large volume of LDAP queries in short window",
+            ],
+            "detection_sigma": """title: AD Privileged Group Enumeration
+id: ad-privileged-group-enum
+status: stable
+description: Detects bulk LDAP enumeration of privileged Active Directory groups from non-admin workstations
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.discovery
+  - attack.t1087.002
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4799
+    GroupName|contains:
+      - 'Domain Admins'
+      - 'Enterprise Admins'
+      - 'Schema Admins'
+      - 'Backup Operators'
+      - 'Account Operators'
+  condition: selection
+falsepositives:
+  - IT admin scripts running membership checks
+  - PAM/IAM solutions
+level: medium
+""",
+            "hunt_query_spl": "index=wineventlog EventCode=4799 | stats count by Account_Name, Group_Name, src | where count > 5 | sort -count",
+            "hunt_query_kql": "SecurityEvent | where EventID == 4799 | summarize count() by Account_Name, GroupName, Computer | where count_ > 5 | order by count_ desc",
+        },
+    },
+    {
+        "name": "Account Takeover — Session Token Hijack",
+        "description": "Attacker steals a valid web session cookie or OAuth access token to impersonate a user without credentials or MFA, bypassing all authentication controls.",
+        "technique_ids": ["T1539", "T1185"],
+        "tactic": "credential-access",
+        "expected_log_sources": ["okta", "azure_ad", "proxy_logs"],
+        "severity": "critical",
+        "tags": ["identity", "iam", "session-hijack", "token-theft", "cloud", "ato"],
+        "sim_metadata": {
+            "platforms": ["cloud", "saas", "web"],
+            "prerequisites": ["Active user session (cookie or OAuth token)", "Network position or browser compromise"],
+            "simulation_steps": [
+                {"step": 1, "action": "Extract session token", "detail": "Use browser developer tools or memory scraper to extract session cookie. Alternatively, AiTM proxy captures token at authentication.", "identity_action": None},
+                {"step": 2, "action": "Replay token from new location", "detail": "Use stolen cookie in new browser/IP: `curl -b 'sessionid=<token>' https://app.company.com/api/profile`. Should succeed without MFA.", "identity_action": None},
+                {"step": 3, "action": "Access sensitive data", "detail": "Export emails, download files, exfiltrate data using the hijacked session. No authentication events generated.", "identity_action": None},
+                {"step": 4, "action": "Establish persistence", "detail": "Register new device, add recovery email, or create API token from hijacked session.", "identity_action": None},
+                {"step": 5, "action": "Containment", "detail": "Revoke all active sessions globally and force re-authentication. Rotate all API tokens.", "identity_action": "revoke_sessions"},
+            ],
+            "expected_logs": [
+                "Same session token used from two different IP addresses",
+                "Session continues after impossible travel event without re-authentication",
+                "User-agent string change mid-session (token replayed in different browser)",
+                "Okta: `user.session.access.admin.app` from IP with no prior login history",
+            ],
+            "detection_sigma": """title: Session Token Hijack — Cross-IP Session Reuse
+id: session-token-ip-change
+status: experimental
+description: Detects session token reuse from a different IP address than the session was created from
+author: PurpleLab Identity Detection
+date: 2026/06/09
+tags:
+  - attack.credential_access
+  - attack.t1539
+logsource:
+  product: okta
+  service: system
+detection:
+  selection:
+    eventType: 'app.oauth2.token.grant.implicit'
+  filter_same_ip:
+    client.ipAddress: '{session_origin_ip}'
+  condition: selection and not filter_same_ip
+falsepositives:
+  - Mobile users on cellular networks with changing IPs
+  - Legitimate VPN reconnection events
+level: critical
+""",
+            "hunt_query_spl": "index=okta | transaction actor.login maxspan=1h keepevicted=true | where eventCount > 1 | eval ip_list=mvdedup(client.ipAddress) | where mvcount(ip_list) > 1 | table actor.login, ip_list, _time",
+            "hunt_query_kql": "SigninLogs | summarize IPAddresses=make_set(IPAddress), SessionCount=count() by UserPrincipalName, CorrelationId | where array_length(IPAddresses) > 1 | project UserPrincipalName, IPAddresses, SessionCount",
+        },
+    },
 ]

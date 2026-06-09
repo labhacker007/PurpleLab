@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -60,6 +61,7 @@ async def list_use_cases(
     active_only: bool = Query(False, description="Return only active use cases"),
     tactic: str | None = Query(None),
     severity: str | None = Query(None),
+    tag: str | None = Query(None, description="Filter by tag (e.g. 'identity')"),
     search: str | None = Query(None, description="Search name and description"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -71,6 +73,7 @@ async def list_use_cases(
         active_only=active_only,
         tactic=tactic,
         severity=severity,
+        tag=tag,
         search=search,
         limit=limit,
         offset=offset,
@@ -207,3 +210,116 @@ async def get_run_history(
     svc = UseCaseService()
     runs = await svc.get_run_history(use_case_id, limit=limit)
     return {"runs": runs, "total": len(runs)}
+
+
+class IdentitySimRequest(BaseModel):
+    action: str = Field(..., description="Identity action: lock_user|unlock_user|disable_user|revoke_sessions|force_mfa|force_pw_reset")
+    target_username: str | None = Field(None, description="Target username; if omitted a random simulated user is selected")
+    reason: str = "purple_team_identity_simulation"
+    dry_run: bool = False
+
+
+@router.post("/{use_case_id}/simulate-identity")
+async def simulate_identity_action(
+    use_case_id: str,
+    body: IdentitySimRequest,
+) -> dict[str, Any]:
+    """Dispatch an identity containment action as part of an identity use case simulation.
+
+    Maps to identity_sim actions: lock_user, unlock_user, disable_user, revoke_sessions, force_mfa, force_pw_reset.
+    Records a ContainmentAction for audit trail.
+    """
+    from backend.db.session import async_session
+    from backend.db import models
+    from sqlalchemy import select
+
+    valid_actions = {"lock_user", "unlock_user", "disable_user", "enable_user", "revoke_sessions", "force_mfa", "force_pw_reset"}
+    if body.action not in valid_actions:
+        raise HTTPException(status_code=400, detail=f"Invalid action '{body.action}'. Valid actions: {sorted(valid_actions)}")
+
+    async with async_session() as db:
+        uc = await db.get(models.UseCase, uuid.UUID(use_case_id))
+        if not uc:
+            raise HTTPException(status_code=404, detail=f"Use case {use_case_id} not found")
+
+        # Verify it's an identity use case
+        tags = uc.tags or []
+        if "identity" not in tags:
+            raise HTTPException(status_code=400, detail="Use case is not tagged as an identity scenario")
+
+        # Find target user
+        if body.target_username:
+            user_q = select(models.SimulatedUser).where(models.SimulatedUser.username == body.target_username)
+        else:
+            from sqlalchemy import func
+            user_q = select(models.SimulatedUser).order_by(func.random()).limit(1)
+
+        target_user = await db.scalar(user_q)
+        if not target_user:
+            # Auto-seed users if none exist
+            from backend.api.v2.identity_sim import _ensure_seed_users
+            await _ensure_seed_users()
+            target_user = await db.scalar(user_q)
+
+        if not target_user:
+            raise HTTPException(status_code=404, detail="No simulated users found — ensure identity sim is seeded")
+
+        if body.dry_run:
+            return {
+                "dry_run": True,
+                "use_case": uc.name,
+                "action": body.action,
+                "target_user": target_user.username,
+                "target_email": target_user.email,
+                "identity_vendor": target_user.identity_vendor,
+                "message": f"Would execute {body.action} on {target_user.username} ({target_user.identity_vendor})",
+            }
+
+        # Apply action — only mutate fields that exist on SimulatedUser
+        prev_status = target_user.status
+        attrs = dict(target_user.attributes or {})
+        if body.action == "lock_user":
+            target_user.status = "locked"
+        elif body.action == "unlock_user":
+            target_user.status = "active"
+        elif body.action == "disable_user":
+            target_user.status = "disabled"
+        elif body.action == "enable_user":
+            target_user.status = "active"
+        elif body.action == "revoke_sessions":
+            attrs["sessions_revoked_at"] = datetime.now(timezone.utc).isoformat()
+            target_user.attributes = attrs
+        elif body.action == "force_mfa":
+            target_user.mfa_enrolled = True
+            attrs["mfa_forced_at"] = datetime.now(timezone.utc).isoformat()
+            target_user.attributes = attrs
+        elif body.action == "force_pw_reset":
+            attrs["pw_reset_required"] = True
+            attrs["pw_reset_forced_at"] = datetime.now(timezone.utc).isoformat()
+            target_user.attributes = attrs
+
+        action_record = models.ContainmentAction(
+            action_type=body.action,
+            target_type="user",
+            target_value=target_user.username,
+            target_id=str(target_user.id),
+            requester="purplelab_identity_sim",
+            reason=f"{body.reason} (use_case: {uc.name})",
+            status="success",
+            result_detail={"use_case_id": use_case_id, "identity_vendor": target_user.identity_vendor},
+        )
+        db.add(action_record)
+        await db.commit()
+        await db.refresh(action_record)
+
+        return {
+            "use_case": uc.name,
+            "action": body.action,
+            "target_user": target_user.username,
+            "target_email": target_user.email,
+            "identity_vendor": target_user.identity_vendor,
+            "previous_status": prev_status,
+            "new_status": target_user.status,
+            "action_id": str(action_record.id),
+            "message": f"Successfully executed {body.action} on {target_user.username}",
+        }

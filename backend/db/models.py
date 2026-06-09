@@ -477,6 +477,7 @@ class UseCase(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)   # continuously tested in pipeline
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)  # comes from seed library
     last_validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    sim_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # simulation steps, sigma, hunt queries
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, server_default=func.now())
 
