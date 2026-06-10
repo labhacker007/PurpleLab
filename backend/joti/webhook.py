@@ -1,11 +1,13 @@
 """Joti webhook receiver.
 
-Provides a FastAPI router that accepts inbound alerts from the Joti platform.
-When Joti sends an alert webhook, PurpleLab looks up matching use cases by
-technique_id and creates UseCaseRun records so the pipeline can score them.
+Provides a FastAPI router that accepts inbound alerts and audit events from
+the Joti platform.
 
-Endpoint: POST /joti/webhook/alerts
-Auth:      X-Joti-Token header must match settings.JOTI_WEBHOOK_TOKEN
+Endpoints:
+  POST /joti/webhook/alerts       — alert ingestion; creates UseCaseRun records
+  POST /joti/audit-events         — audit event stream from Joti SIEM forwarder
+
+Auth: X-Joti-Token header must match settings.JOTI_WEBHOOK_TOKEN
 """
 from __future__ import annotations
 
@@ -90,6 +92,48 @@ async def receive_alert_webhook(request: Request) -> dict[str, Any]:
     # ── Process each alert ───────────────────────────────────────────────
     accepted = await _process_alerts(alerts)
     logger.info("Joti webhook: accepted %d run(s) from %d alert(s)", accepted, len(alerts))
+    return {"accepted": accepted}
+
+
+@router.post(
+    "/audit-events",
+    status_code=status.HTTP_200_OK,
+    summary="Receive audit event stream from Joti SIEM forwarder",
+    description=(
+        "Joti's SIEM Audit Forwarder (target_type='purplelab') calls this endpoint "
+        "to forward platform audit logs in real-time. Events are stored in "
+        "joti_audit_events and correlated with active simulation sessions — "
+        "HUNT_TRIGGER and EXTRACTION events update UseCaseRun detection scores."
+    ),
+)
+async def receive_audit_events(request: Request) -> dict[str, Any]:
+    """Receive Joti audit events and correlate with active simulation sessions."""
+    _verify_token(request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Request body must be valid JSON",
+        )
+
+    logs: list[dict[str, Any]]
+    if isinstance(body, list):
+        logs = body
+    elif isinstance(body, dict):
+        logs = body.get("logs", [body] if "event_type" in body else [])
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Expected a JSON list or object with 'logs' key",
+        )
+
+    if not logs:
+        return {"accepted": 0}
+
+    accepted = await _store_audit_events(logs)
+    logger.info("Joti audit-events: stored %d event(s) from %d received", accepted, len(logs))
     return {"accepted": accepted}
 
 
@@ -225,6 +269,97 @@ async def _process_alerts(alerts: list[dict[str, Any]]) -> int:
             await db.commit()
         except Exception as exc:
             logger.error("Failed to commit webhook runs: %s", exc)
+            await db.rollback()
+            return 0
+
+    return accepted
+
+
+async def _store_audit_events(logs: list[dict[str, Any]]) -> int:
+    """Persist Joti audit events and trigger detection correlation for relevant types."""
+    from backend.db.models import JotiAuditEvent, UseCase, UseCaseRun
+    from sqlalchemy import select
+
+    now = datetime.now(timezone.utc)
+    accepted = 0
+
+    # Detection-relevant event types that should trigger a UseCaseRun update
+    _DETECTION_EVENTS = {"HUNT_TRIGGER", "EXTRACTION"}
+
+    async with async_session() as db:
+        for log in logs:
+            created_at_joti = None
+            if log.get("created_at"):
+                try:
+                    created_at_joti = datetime.fromisoformat(
+                        log["created_at"].replace("Z", "+00:00")
+                    )
+                except Exception:
+                    pass
+
+            event = JotiAuditEvent(
+                id=uuid.uuid4(),
+                joti_event_id=log.get("id"),
+                event_type=str(log.get("event_type", "UNKNOWN")),
+                action=str(log.get("action") or ""),
+                user_email=log.get("user_email"),
+                ip_address=log.get("ip_address"),
+                resource_type=log.get("resource_type"),
+                resource_id=log.get("resource_id"),
+                correlation_id=log.get("correlation_id"),
+                details=log.get("details") or {},
+                created_at_joti=created_at_joti,
+                received_at=now,
+            )
+            db.add(event)
+            accepted += 1
+
+            # For detection events, try to link to active use cases via technique_id
+            evt_type = str(log.get("event_type", ""))
+            if evt_type in _DETECTION_EVENTS:
+                details = log.get("details") or {}
+                tech = (
+                    details.get("technique_id")
+                    or details.get("technique")
+                    or log.get("technique_id")
+                )
+                if tech:
+                    tech_upper = str(tech).upper()
+                    try:
+                        result = await db.execute(
+                            select(UseCase).where(UseCase.is_active == True)  # noqa: E712
+                        )
+                        use_cases = result.scalars().all()
+                        matched = [
+                            uc for uc in use_cases
+                            if uc.technique_ids and tech_upper in [t.upper() for t in (uc.technique_ids or [])]
+                        ]
+                        for uc in matched:
+                            run = UseCaseRun(
+                                id=uuid.uuid4(),
+                                use_case_id=uc.id,
+                                status="passed",
+                                triggered_by="joti_audit",
+                                events_generated=0,
+                                rules_tested=1,
+                                rules_fired=1,
+                                run_details={
+                                    "joti_event_type": evt_type,
+                                    "joti_event_id": log.get("id"),
+                                    "technique_id": tech_upper,
+                                    "action": log.get("action"),
+                                },
+                                started_at=now,
+                                completed_at=now,
+                            )
+                            db.add(run)
+                    except Exception as exc:
+                        logger.warning("audit_event_correlation failed tech=%s: %s", tech, exc)
+
+        try:
+            await db.commit()
+        except Exception as exc:
+            logger.error("Failed to commit audit events: %s", exc)
             await db.rollback()
             return 0
 

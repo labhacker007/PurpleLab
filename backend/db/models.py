@@ -949,6 +949,32 @@ class EnvironmentTemplate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+# ── Joti TIP Integration — Audit Events ──────────────────────────────────────
+
+class JotiAuditEvent(Base):
+    """Audit events forwarded from the Joti TIP platform.
+
+    Joti sends these via its SIEM Audit Forwarder (target_type='purplelab').
+    Events are stored for correlation with running simulation sessions —
+    HUNT_TRIGGER and EXTRACTION events indicate detection activity that
+    should be reflected in UseCaseRun scoring.
+    """
+    __tablename__ = "joti_audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    joti_event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    user_email: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    resource_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at_joti: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=_now, server_default=func.now())
+
+
 # ── Environment Threat Profile ────────────────────────────────────────────────
 
 class EnvironmentThreatProfile(Base):

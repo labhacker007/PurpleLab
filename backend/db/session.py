@@ -36,7 +36,7 @@ async def init_db() -> None:
     from backend.db.models import Base
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, checkfirst=True))
 
 
 async def close_db() -> None:
