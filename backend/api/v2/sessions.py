@@ -689,6 +689,7 @@ async def _get_or_404(session_id: str) -> SimulationSession:
 
 
 async def _do_stop(session_id: str) -> None:
+    stopped_session = None
     async with async_session() as session:
         result = await session.execute(
             select(SimulationSession).where(
@@ -700,12 +701,35 @@ async def _do_stop(session_id: str) -> None:
             s.status = "stopped"
             s.updated_at = datetime.utcnow()
             await session.commit()
+            stopped_session = s
     try:
         from backend.engine.session_manager import get_session_manager
         mgr = get_session_manager()
         await mgr.stop_session(session_id)
     except Exception:
         pass
+    # Push simulation result to Joti so it flows through the alert pipeline
+    if stopped_session is not None:
+        try:
+            from backend.joti.client import get_joti_client
+            joti = get_joti_client()
+            if joti:
+                cfg = stopped_session.config or {}
+                await joti.push_simulation_result({
+                    "session_id": session_id,
+                    "session_name": stopped_session.name or "Simulation",
+                    "technique_ids": cfg.get("technique_ids") or cfg.get("ttps") or [],
+                    "severity": cfg.get("severity", "medium"),
+                    "events_generated": stopped_session.events_sent or 0,
+                    "hit": True,
+                    "summary": (
+                        f"PurpleLab simulation '{stopped_session.name}' completed. "
+                        f"{stopped_session.events_sent or 0} events generated."
+                    ),
+                })
+        except Exception as _exc:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("joti_push_failed: %s", _exc)
 
 
 def _session_to_dict(s: SimulationSession) -> dict[str, Any]:

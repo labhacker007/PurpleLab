@@ -271,12 +271,16 @@ async def _call_claude_for_templates(
     from backend.llm.config import LLMFunction
 
     router = get_router()
-    client = await router.get_client_async(LLMFunction.LOG_GENERATION)
-    resp = await client.complete(
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_tokens,
-        json_mode=True,
-    )
+    try:
+        client = await router.get_client_async(LLMFunction.LOG_GENERATION)
+        resp = await client.complete(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
+    except Exception as exc:
+        logger.warning("LLM unavailable for log generation, using schema fallback: %s", exc)
+        return []
     raw = resp.text.strip()
 
     # Strip accidental markdown fences (some models still add them)
