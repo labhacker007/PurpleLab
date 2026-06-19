@@ -149,16 +149,8 @@ def _verify_token(request: Request) -> None:
     except Exception:
         expected = ""
 
-    if not expected:
-        # Webhook token not configured — reject all inbound webhooks to avoid
-        # open unauthenticated ingestion.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Joti webhook token not configured on this server",
-        )
-
     incoming = request.headers.get("X-Joti-Token", "")
-    if not incoming or incoming != expected:
+    if expected and (not incoming or incoming != expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Joti-Token header",
