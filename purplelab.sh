@@ -339,12 +339,61 @@ wait_for() {
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Build
+# Build (optimized)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Build strategy (fastest → slowest):
+#   ./purplelab.sh build backend   → only rebuild backend (pip cache: unchanged deps skipped)
+#   ./purplelab.sh build frontend  → only rebuild frontend (npm cache: unchanged pkgs skipped)
+#   ./purplelab.sh build           → rebuild both (default, uses layer cache)
+#   ./purplelab.sh build --no-cache → full rebuild from scratch (use when layers are corrupted)
+#
+# celery_worker + celery_beat share the backend image — they are NOT rebuilt separately.
+# BuildKit cache mounts are enabled automatically via DOCKER_BUILDKIT=1.
+#
 cmd_build() {
     step "Building Docker Images"
-    docker compose -f "$COMPOSE_FILE" build "$@" 2>&1 | tail -5
-    ok "Docker images built"
+
+    # Enable BuildKit for cache mount support (--mount=type=cache in Dockerfiles)
+    export DOCKER_BUILDKIT=1
+    export COMPOSE_DOCKER_CLI_BUILD=1
+
+    local no_cache=""
+    local targets=()
+
+    for arg in "$@"; do
+        case "$arg" in
+            --no-cache) no_cache="--no-cache" ;;
+            backend|frontend) targets+=("$arg") ;;
+            *) ;;
+        esac
+    done
+
+    # Default: build both backend and frontend
+    if [ ${#targets[@]} -eq 0 ]; then
+        targets=("backend" "frontend")
+    fi
+
+    if [ -n "$no_cache" ]; then
+        warn "Building with --no-cache (slow — all layers rebuilt from scratch)"
+    else
+        info "Building with layer cache (fast — only changed layers rebuild)"
+        info "Targets: ${targets[*]}"
+    fi
+
+    docker compose -f "$COMPOSE_FILE" build $no_cache "${targets[@]}" 2>&1 | grep -E "^(#[0-9]+ |Step |Successfully|ERROR|error)" || true
+    ok "Docker images built: ${targets[*]}"
+    info "Note: celery_worker and celery_beat reuse the backend image — no separate build needed."
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Release (build + up + migrate in one shot)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cmd_release() {
+    step "Release: Build → Launch → Migrate"
+    cmd_build
+    cmd_up
+    ok "PurpleLab released and running"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -897,7 +946,11 @@ cmd_help() {
     printf "    ${C}./purplelab.sh up${N}                 Start all services\n"
     printf "    ${C}./purplelab.sh down${N}               Stop all services\n"
     printf "    ${C}./purplelab.sh restart${N}            Restart everything\n"
-    printf "    ${C}./purplelab.sh build${N}              Rebuild Docker images\n"
+    printf "    ${C}./purplelab.sh build${N}              Rebuild backend + frontend images (uses cache)\n"
+    printf "    ${C}./purplelab.sh build backend${N}      Rebuild backend image only\n"
+    printf "    ${C}./purplelab.sh build frontend${N}     Rebuild frontend image only\n"
+    printf "    ${C}./purplelab.sh build --no-cache${N}   Full rebuild from scratch (slow)\n"
+    printf "    ${C}./purplelab.sh release${N}            Build + launch + migrate in one shot\n"
     printf "    ${C}./purplelab.sh status${N}             Health check all services\n"
     printf "    ${C}./purplelab.sh heal${N}               Auto-diagnose and fix problems\n"
     printf "    ${C}./purplelab.sh logs [service]${N}     Tail logs\n"
@@ -966,6 +1019,7 @@ case "${1:-}" in
     down|stop)       cmd_down ;;
     restart)         cmd_restart ;;
     build)           shift; cmd_build "$@" ;;
+    release)         cmd_release ;;
     status)          cmd_status ;;
     heal|fix)        cmd_heal ;;
     logs)            shift; cmd_logs "$@" ;;

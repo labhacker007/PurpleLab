@@ -98,9 +98,7 @@ services:
 
   # ── Celery Worker ───────────────────────────────────────────────────────────
   celery_worker:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    image: purplelab-backend
     container_name: purplelab-worker
     command: celery -A backend.celery_app worker --loglevel=info --concurrency=2
     env_file: .env
@@ -133,9 +131,7 @@ services:
 
   # ── Celery Beat (Scheduler) ─────────────────────────────────────────────────
   celery_beat:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    image: purplelab-backend
     container_name: purplelab-beat
     command: celery -A backend.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
     env_file: .env

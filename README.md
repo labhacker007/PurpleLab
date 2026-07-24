@@ -95,20 +95,32 @@ PurpleLab is a standalone simulation platform that mimics real-world security pr
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/labhacker007/purplelab.git
-cd purplelab
+git clone https://github.com/labhacker007/PurpleLab.git
+cd PurpleLab
 
-# Run with Docker
-docker compose up -d
-
-# Open UI
-open http://localhost:4000
-
-# Or run directly
-pip install -r requirements.txt
-python -m uvicorn backend.main:app --port 4000
+# One command: builds images, starts all services, runs migrations
+bash purplelab.sh release
 ```
+
+| Service | URL |
+|---------|-----|
+| Backend API | http://localhost:8002 |
+| API Docs | http://localhost:8002/docs |
+| Frontend | http://localhost:3002 |
+
+### Common build commands
+
+```bash
+bash purplelab.sh build backend    # rebuild backend only (fast, uses pip cache)
+bash purplelab.sh build frontend   # rebuild frontend only (fast, uses npm cache)
+bash purplelab.sh build            # rebuild both
+bash purplelab.sh up               # start all containers
+bash purplelab.sh down             # stop all containers
+bash purplelab.sh status           # health check
+bash purplelab.sh logs             # tail logs
+```
+
+> **Full installation guide, build optimization details, and troubleshooting:** [docs/INSTALL.md](docs/INSTALL.md)
 
 ## How It Works
 

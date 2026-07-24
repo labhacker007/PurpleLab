@@ -2,10 +2,11 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install dependencies (use install since no lockfile is committed yet;
-# once package-lock.json is committed, switch to: RUN npm ci)
-COPY package.json ./
-RUN npm install
+# npm ci is deterministic and faster than npm install (uses lockfile).
+# --mount=type=cache keeps the npm cache across builds — unchanged packages skip download.
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline
 
 # ── Stage 2: Build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
