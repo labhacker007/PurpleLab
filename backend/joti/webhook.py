@@ -165,7 +165,7 @@ async def _process_alerts(alerts: list[dict[str, Any]]) -> int:
     from backend.db.models import UseCase, UseCaseRun
     from sqlalchemy import select
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()  # naive UTC — matches TIMESTAMP WITHOUT TIME ZONE columns
     accepted = 0
 
     async with async_session() as db:
@@ -272,7 +272,7 @@ async def _store_audit_events(logs: list[dict[str, Any]]) -> int:
     from backend.db.models import JotiAuditEvent, UseCase, UseCaseRun
     from sqlalchemy import select
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()  # naive UTC — matches TIMESTAMP WITHOUT TIME ZONE column
     accepted = 0
 
     # Detection-relevant event types that should trigger a UseCaseRun update

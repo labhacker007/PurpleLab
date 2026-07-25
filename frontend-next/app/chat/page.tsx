@@ -322,7 +322,7 @@ function extractResultSummary(toolName: string, result: unknown): string {
     case 'list_environments':
       return `${d?.total ?? 0} environment${(d?.total as number) !== 1 ? 's' : ''}`
     case 'apply_threat_profile':
-      return `${d?.technique_count ?? d?.technique_ids?.length ?? 0} TTPs`
+      return `${d?.technique_count ?? (Array.isArray(d?.technique_ids) ? d.technique_ids.length : 0)} TTPs`
     case 'run_scenario':
     case 'get_session':
       return d?.id ? `session ${String(d.id).slice(0, 8)}` : ''

@@ -20,6 +20,8 @@ from backend.engine.generators.asm import ASMGenerator
 from backend.engine.generators.cmdb import CMDBGenerator
 from backend.engine.generators.cspm import CSPMGenerator
 from backend.engine.generators.product_registry import ProductRegistryGenerator
+from backend.engine.generators.sentinelone import SentinelOneGenerator
+from backend.engine.generators.xsiam import XSIAMGenerator
 
 GENERATOR_REGISTRY: dict[str, type[BaseGenerator]] = {
     "splunk": SplunkGenerator,
@@ -38,6 +40,8 @@ GENERATOR_REGISTRY: dict[str, type[BaseGenerator]] = {
     "cmdb": CMDBGenerator,
     "cspm": CSPMGenerator,
     "product_registry": ProductRegistryGenerator,
+    "sentinelone": SentinelOneGenerator,
+    "xsiam": XSIAMGenerator,
 }
 
 __all__ = ["GENERATOR_REGISTRY", "BaseGenerator", "GeneratorConfig"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Any
 
 import sqlalchemy as sa
@@ -287,7 +287,7 @@ class UseCaseService:
                 use_case_id=uc.id,
                 status="running",
                 triggered_by=triggered_by,
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.utcnow(),
             )
             db.add(run)
             await db.commit()
@@ -316,10 +316,10 @@ class UseCaseService:
                     "rule_results": result.get("rule_results", []),
                     "expected_rules_fired": result.get("expected_rules_fired", 0),
                 }
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.utcnow()
 
                 if uc:
-                    uc.last_validated_at = datetime.now(timezone.utc)
+                    uc.last_validated_at = datetime.utcnow()
 
                 await db.commit()
                 await db.refresh(run)
@@ -355,7 +355,7 @@ class UseCaseService:
                 if run:
                     run.status = "error"
                     run.error_message = str(exc)
-                    run.completed_at = datetime.now(timezone.utc)
+                    run.completed_at = datetime.utcnow()
                     await db.commit()
                     await db.refresh(run)
                     return _run_to_dict(run)

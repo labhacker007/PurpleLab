@@ -21,5 +21,7 @@ from backend.engine.generators import (
     ElasticGenerator,
     GuardDutyGenerator,
 )
+from backend.engine.generators.sentinelone import SentinelOneGenerator
+from backend.engine.generators.xsiam import XSIAMGenerator
 
 __all__ = ["GENERATOR_REGISTRY", "BaseGenerator", "GeneratorConfig"]
