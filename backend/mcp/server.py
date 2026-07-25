@@ -787,6 +787,56 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    # ── Vulnerability Management ──────────────────────────────────────────────
+    {
+        "name": "vm_get_summary",
+        "description": (
+            "Fetch the org-wide vulnerability posture snapshot from PurpleLab VM: "
+            "total open CVEs by severity, CISA KEV count, exploit-available count, "
+            "mean time to remediate (MTTR), top 5 affected products, and top 5 critical assets."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "vm_list_findings",
+        "description": (
+            "List CVE findings from PurpleLab VM. Filter by severity or status. "
+            "Returns CVE ID, title, severity, CVSS score, affected asset, KEV/exploit flags, and status."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "severity": {
+                    "type": "string",
+                    "enum": ["critical", "high", "medium", "low"],
+                    "description": "Filter by CVE severity",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["open", "resolved", "false_positive"],
+                    "description": "Filter by finding status (default: open)",
+                },
+                "limit": {"type": "integer", "default": 50, "description": "Max findings to return (max 200)"},
+                "skip": {"type": "integer", "default": 0, "description": "Offset for pagination"},
+            },
+        },
+    },
+    {
+        "name": "vm_list_critical_vulns",
+        "description": (
+            "Quick shortcut: list all CRITICAL severity open CVE findings from PurpleLab VM. "
+            "Useful for prioritised triage — returns top critical CVEs with asset and exploit info."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 20, "description": "Max results"},
+            },
+        },
+    },
 ]
 
 # Build a name → definition index for fast lookup
@@ -1588,6 +1638,36 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             ],
             "total": len(personas),
         }
+
+    elif name == "vm_get_summary":
+        async with httpx.AsyncClient() as c:
+            r = await c.get(f"{base}/vm/summary", timeout=15)
+            r.raise_for_status()
+        return r.json()
+
+    elif name == "vm_list_findings":
+        params: dict = {"limit": arguments.get("limit", 50), "skip": arguments.get("skip", 0)}
+        if arguments.get("severity"):
+            params["severity"] = arguments["severity"]
+        if arguments.get("status"):
+            params["status"] = arguments["status"]
+        else:
+            params["status"] = "open"
+        async with httpx.AsyncClient() as c:
+            r = await c.get(f"{base}/vm/findings", params=params, timeout=15)
+            r.raise_for_status()
+        return r.json()
+
+    elif name == "vm_list_critical_vulns":
+        params = {"severity": "critical", "status": "open", "limit": arguments.get("limit", 20), "skip": 0}
+        async with httpx.AsyncClient() as c:
+            r = await c.get(f"{base}/vm/findings", params=params, timeout=15)
+            r.raise_for_status()
+        data = r.json()
+        findings = data.get("findings", [])
+        # Sort by CVSS score descending so highest-risk CVEs appear first
+        findings.sort(key=lambda f: f.get("cvss_score") or 0, reverse=True)
+        return {"findings": findings, "total": data.get("total", len(findings))}
 
     else:
         raise ValueError(f"Unknown tool: {name}")
