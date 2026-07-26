@@ -1,9 +1,9 @@
 # PurpleLab — Miro Board Diagram Index
 
 **Board URL:** https://miro.com/app/board/uXjVH4f6yEA=/  
-**Version:** 1.0 | **Date:** 2026-07-26 | **Total Diagrams:** 17
+**Version:** 1.1 | **Date:** 2026-07-26 | **Total Diagrams:** 18
 
-All 17 diagrams are interactive, zoomable, and fully linked on the Miro board.  
+All 18 diagrams are interactive, zoomable, and fully linked on the Miro board.  
 Use the widget links below to jump directly to any diagram.
 
 ---
@@ -21,7 +21,8 @@ Use the widget links below to jump directly to any diagram.
 
 | # | Title | Widget ID | Direct Link |
 |---|-------|-----------|-------------|
-| 5 | Action Executor — 11 SOAR Actions, ContainmentAction Audit Log | 3458764679164391352 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164391352) |
+| 5 | 16-Vendor Enterprise API Simulation Architecture *(updated Jul 26 2026)* | 3458764679181478591 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679181478591) |
+| 5-old | 4-Vendor Simulation Architecture — Splunk XSIAM CrowdStrike Defender *(superseded)* | 3458764679164391352 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164391352) |
 | 6 | Joti Integration Data Flow — Audit Push, HUNT_TRIGGER, EXTRACTION | 3458764679164496484 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164496484) |
 | 7 | Pipeline Runner — PipelineConfig, DES Score Delta, Scheduling | 3458764679164391628 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164391628) |
 | 8 | Database Schema — All 30+ ORM Models and Relationships | 3458764679164496676 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164496676) |
@@ -33,7 +34,7 @@ Use the widget links below to jump directly to any diagram.
 | 9 | HITL Approval Engine — L0 to L3, Magic Link, Auto-Approval | 3458764679164496860 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164496860) |
 | 10 | Use Case and Detection Run — UseCaseRun, DES Scoring, Coverage | 3458764679164496903 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164496903) |
 | 11 | CSPM and VM Vulnerability Management — CVE, EPSS, Risk Scoring | 3458764679164568001 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164568001) |
-| 12 | 4 Vendor API Emulations — Splunk, XSIAM, CrowdStrike, Defender | 3458764679164568082 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164568082) |
+| 12 | Detection Rule Import Parse Deploy Evaluate Score | 3458764679164568082 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164568082) |
 
 ## Row 4 — Operational Workflows (y=24000)
 
@@ -50,16 +51,40 @@ Use the widget links below to jump directly to any diagram.
 |---|-------|-----------|-------------|
 | 17 | Complete Platform Architecture — All Subsystems Overview | 3458764679164615738 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679164615738) |
 
+## Row 6 — Vendor API Coverage (y=21500)
+
+| # | Title | Widget ID | Direct Link |
+|---|-------|-----------|-------------|
+| 18 | 16-Vendor Enterprise API Simulation Architecture (full detail) | 3458764679181478591 | [Open](https://miro.com/app/board/uXjVH4f6yEA=/?moveToWidget=3458764679181478591) |
+
+---
+
+## 16 Vendor API Simulations (Jul 26 2026)
+
+| Category | Vendors | Files |
+|----------|---------|-------|
+| EDR / XDR (5) | CrowdStrike Falcon, Microsoft Defender MDE, SentinelOne Singularity, VMware Carbon Black, Palo Alto XSIAM | crowdstrike.py, defender.py, sentinelone.py, carbonblack.py, xsiam.py |
+| SIEM / Log Analytics (3) | Splunk Enterprise Security, IBM QRadar, Elastic SIEM | splunk.py, qradar.py, elastic.py |
+| Vulnerability Management / CSPM (3) | Tenable.io, Qualys VMDR, Wiz CSPM | tenable.py, qualys.py, wiz.py |
+| ITSM / CMDB (2) | ServiceNow ITSM+CMDB, Jira Cloud+JSM | servicenow.py, jira.py |
+| Identity & Access (2) | Okta Identity, Microsoft Entra ID | okta.py, entra_id.py |
+| Network Security (1) | Palo Alto Panorama NGFW | panorama.py |
+
+All files under `backend/api/vendor/`. All registered in `backend/main.py`.  
+Seed data: CORP-WS-001 (jsmith, 10.10.1.101), CORP-SRV-001 (10.10.2.10), CORP-DC-001 (10.10.2.1).
+
 ---
 
 ## Diagram Colour Coding
 
 | Colour | Meaning |
 |--------|---------|
-| Blue `#c6dcff` | Entry/exit points, infrastructure (UI, API, DB, platform-level) |
-| Green `#adf0c7` | Core engine components (session, EDR, detection, orchestration) |
-| Yellow `#fff6b6` | Vendor API emulations (Splunk, XSIAM, CrowdStrike, Defender) |
-| Red/Pink `#ffc6c6` | Control plane (HITL, Joti integration, pipeline runner, tabletop) |
+| Blue `#c6dcff` | Entry/exit points, infrastructure (UI, API, DB, platform-level); EDR/XDR vendors |
+| Green `#adf0c7` | Core engine components (session, EDR, detection, orchestration); central orchestrator |
+| Yellow `#fff6b6` | SIEM + Network vendors; process nodes |
+| Red/Pink `#ffc6c6` | IAM/Identity vendors; Control plane (HITL, Joti integration) |
+| Purple `#dedaff` | VM/CSPM vendors |
+| Orange `#f8d3af` | ITSM/CMDB vendors |
 
 ## Related Documentation
 
