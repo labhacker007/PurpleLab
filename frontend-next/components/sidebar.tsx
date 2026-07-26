@@ -28,6 +28,7 @@ import {
   GitBranch,
   Brain,
   Layers,
+  HelpCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/stores/ui"
@@ -215,6 +216,12 @@ export function Sidebar() {
 
         {/* Divider before admin section */}
         <div className="border-t border-border/60 my-2" />
+
+        {/* User Guide */}
+        <Link href="/guide" className={linkClass(isActive("/guide"))}>
+          <HelpCircle className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && <span>User Guide</span>}
+        </Link>
 
         {/* Settings (always visible) */}
         <Link href="/settings" className={linkClass(isActive("/settings"))}>
