@@ -23,6 +23,11 @@ from backend.api.vendor.entra_id import router as entra_router
 from backend.api.vendor.elastic import router as elastic_router
 from backend.api.vendor.sentinelone import router as sentinelone_router
 from backend.api.vendor.panorama import router as panorama_router
+from backend.api.vendor.servicenow import router as servicenow_router
+from backend.api.vendor.jira import router as jira_router
+from backend.api.vendor.tenable import router as tenable_router
+from backend.api.vendor.wiz import router as wiz_router
+from backend.api.vendor.qualys import router as qualys_router
 from backend.api.v2.sim_siem import router as sim_siem_router
 from backend.api.v2.tabletop import router as tabletop_router
 
@@ -79,6 +84,11 @@ app.include_router(entra_router)
 app.include_router(elastic_router)
 app.include_router(sentinelone_router)
 app.include_router(panorama_router)
+app.include_router(servicenow_router)
+app.include_router(jira_router)
+app.include_router(tenable_router)
+app.include_router(wiz_router)
+app.include_router(qualys_router)
 
 # Simulation SIEM + Tabletop
 app.include_router(sim_siem_router)
