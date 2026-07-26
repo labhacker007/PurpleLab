@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
