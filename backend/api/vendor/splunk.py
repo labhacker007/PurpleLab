@@ -179,6 +179,9 @@ _KV_COLLECTIONS: dict[str, dict] = {
 
 _RISK_SCORES: dict[str, dict] = {}
 
+# HEC ingested events — keyed by index, each entry is a list of event dicts
+_HEC_EVENTS: dict[str, list[dict]] = {"main": [], "purplelab": [], "wineventlog": [], "notable": []}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPL query interpreter — generates realistic results per query pattern
@@ -223,13 +226,21 @@ def _execute_spl(spl: str, earliest: str = "-24h", latest: str = "now") -> list[
     if "stats count" in spl_lower or "stats sum" in spl_lower:
         return [{"count": "3", "host": "CORP-WS-001"}, {"count": "1", "host": "CORP-SRV-001"}]
 
-    # Generic index search
+    # Generic index search — return HEC-ingested events first, then synthetic fallback
     if "index=" in spl_lower:
         index_match = re.search(r"index=(\w+)", spl_lower)
         index = index_match.group(1) if index_match else "main"
+        hec = list(_HEC_EVENTS.get(index, [])) + list(_HEC_EVENTS.get("purplelab", []))
+        if hec:
+            return hec[:500]
         return [
             {"_time": str(_epoch()), "index": index, "host": "CORP-WS-001", "_raw": f"Synthetic event from {index}", "source": "simulation", "sourcetype": "generic"},
         ]
+
+    # Return all HEC-ingested events when no specific pattern matched
+    all_hec = [e for evts in _HEC_EVENTS.values() for e in evts]
+    if all_hec:
+        return all_hec[:500]
 
     return []
 
@@ -247,6 +258,119 @@ async def login(request: Request):
         "message": "",
         "name": "admin",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HEC — HTTP Event Collector (receives PurpleLab-generated logs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/services/collector/health")
+@router.get("/services/collector/health/1.0")
+async def hec_health():
+    """HEC health check — SplunkConnector pings this before pushing."""
+    return {"text": "HEC is healthy", "code": 17}
+
+
+@router.post("/services/collector/event")
+@router.post("/services/collector")
+async def hec_ingest(request: Request):
+    """HEC batch ingest endpoint.
+
+    Accepts newline-delimited JSON (one HEC envelope per line):
+      {"time": 1234567890, "index": "purplelab", "sourcetype": "purplelab",
+       "event": {...}}
+
+    Or a single JSON object. Stores events in _HEC_EVENTS so they appear
+    in subsequent SPL searches.
+    """
+    body_bytes = await request.body()
+    body_text = body_bytes.decode("utf-8", errors="replace").strip()
+    count = 0
+    errors = []
+
+    lines = [l.strip() for l in body_text.splitlines() if l.strip()]
+    if not lines:
+        return {"text": "Success", "code": 0, "count": 0}
+
+    for line in lines:
+        try:
+            envelope = json.loads(line)
+            # Support both wrapped {"event": {...}} and bare event dicts
+            if "event" in envelope:
+                raw_event = envelope["event"] if isinstance(envelope["event"], dict) else {"_raw": str(envelope["event"])}
+                index = envelope.get("index", "purplelab")
+                sourcetype = envelope.get("sourcetype", "purplelab")
+                ts = envelope.get("time", _epoch())
+            else:
+                raw_event = envelope
+                index = "purplelab"
+                sourcetype = envelope.get("sourcetype", "purplelab")
+                ts = envelope.get("_time", str(_epoch()))
+
+            enriched = {
+                "_time": str(ts),
+                "index": index,
+                "sourcetype": sourcetype,
+                "source": "purplelab",
+                "_raw": json.dumps(raw_event),
+                **raw_event,
+            }
+            if index not in _HEC_EVENTS:
+                _HEC_EVENTS[index] = []
+            _HEC_EVENTS[index].append(enriched)
+            # Also mirror to "purplelab" index for easy cross-search
+            if index != "purplelab":
+                _HEC_EVENTS["purplelab"].append(enriched)
+            count += 1
+        except Exception as exc:
+            errors.append(str(exc))
+
+    # Auto-create notable events from high/critical severity HEC events
+    for evts in list(_HEC_EVENTS.values()):
+        for evt in evts[-count:]:
+            sev = str(evt.get("severity", evt.get("level", ""))).lower()
+            if sev in ("high", "critical") and evt.get("technique_id"):
+                nid = f"notable-hec-{hashlib.md5(json.dumps(evt, default=str).encode()).hexdigest()[:8]}"
+                if nid not in _NOTABLE_EVENTS:
+                    _NOTABLE_EVENTS[nid] = {
+                        "event_id": nid,
+                        "_time": evt.get("_time", str(_epoch())),
+                        "rule_name": evt.get("name", evt.get("technique_id", "PurpleLab Simulated Event")),
+                        "rule_id": f"purplelab_{evt.get('technique_id', 'unknown').lower().replace('.', '_')}",
+                        "security_domain": "endpoint",
+                        "severity": sev,
+                        "urgency": sev,
+                        "priority": "high" if sev == "critical" else "medium",
+                        "status": "1",
+                        "status_label": "New",
+                        "owner": "unassigned",
+                        "dest": evt.get("host", evt.get("hostname", "CORP-WS-001")),
+                        "src": evt.get("src_ip", evt.get("ip", "10.10.1.101")),
+                        "user": evt.get("user", evt.get("username", "unknown")),
+                        "mitre_attack_id": evt.get("technique_id", ""),
+                        "mitre_tactic": evt.get("tactic", ""),
+                        "tag": f"purplelab simulation {sev}",
+                        "comment": "",
+                        "annotations": json.dumps({"purplelab": True, "session_id": evt.get("session_id", "")}),
+                        "num_hosts": "1",
+                        "num_events": "1",
+                        "drilldown_search": f"index=purplelab technique_id={evt.get('technique_id', '')}",
+                        "drilldown_earliest": "-1h",
+                        "drilldown_latest": "now",
+                        "risk_score": "80" if sev == "critical" else "60",
+                        "confidence": "high",
+                        "impact": sev,
+                    }
+
+    return {"text": "Success", "code": 0, "count": count, "errors": errors}
+
+
+@router.get("/services/collector/event")
+async def hec_query(index: str = Query("purplelab"), count: int = Query(100)):
+    """Query HEC-ingested events — convenience endpoint for testing."""
+    evts = _HEC_EVENTS.get(index, [])
+    return {"index": index, "count": len(evts), "events": evts[-count:]}
+
 
 
 @router.delete("/services/auth/login")

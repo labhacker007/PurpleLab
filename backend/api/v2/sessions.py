@@ -670,6 +670,109 @@ async def get_session_context(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# SIEM push — forward generated events to a configured SIEM connection
+# ---------------------------------------------------------------------------
+
+@router.post("/{session_id}/push-to-siem")
+async def push_session_to_siem(session_id: str, body: dict = Body(default={})):
+    """Push all GeneratedEvents from this session to a SIEM connection.
+
+    Body (optional):
+      connection_id — UUID of a SIEMConnection. If omitted, uses the first
+                      available connection or auto-creates one pointing at the
+                      bundled Splunk vendor simulation.
+
+    Returns: {pushed, connection_id, connection_name, siem_type}
+    """
+    import os
+    from sqlalchemy import select as sa_select
+    from backend.db.models import SIEMConnection
+    from backend.siem_integration.connection_manager import ConnectionManager
+
+    await _get_or_404(session_id)
+
+    async with async_session() as db:
+        # Collect events
+        q = (
+            sa_select(GeneratedEvent)
+            .where(GeneratedEvent.session_id == uuid.UUID(session_id))
+            .order_by(GeneratedEvent.created_at)
+        )
+        result = await db.execute(q)
+        events = result.scalars().all()
+
+        if not events:
+            return {"pushed": 0, "message": "No events to push"}
+
+        # Resolve connection
+        conn_id = body.get("connection_id")
+        if conn_id:
+            conn_row = await db.get(SIEMConnection, uuid.UUID(conn_id))
+            if not conn_row:
+                raise HTTPException(status_code=404, detail="SIEM connection not found")
+        else:
+            # Use first available connection
+            r2 = await db.execute(sa_select(SIEMConnection).limit(1))
+            conn_row = r2.scalars().first()
+
+        if not conn_row:
+            # Auto-create connection to bundled Splunk sim
+            mgr = ConnectionManager()
+            splunk_base = os.environ.get("SPLUNK_SIM_URL", "http://purplelab-backend:8000/api/vendor/splunk")
+            conn_row_dict = await mgr.create_connection(
+                name="PurpleLab Splunk Sim (auto)",
+                siem_type="splunk",
+                config_dict={
+                    "base_url": splunk_base,
+                    "hec_url": splunk_base,
+                    "hec_token": "purplelab-sim-token",
+                    "username": "admin",
+                    "password": "changeme",
+                },
+            )
+            conn_id = conn_row_dict["id"]
+            conn_name = conn_row_dict["name"]
+            siem_type = "splunk"
+        else:
+            conn_id = str(conn_row.id)
+            conn_name = conn_row.name
+            siem_type = conn_row.siem_type
+
+    # Build normalised log payloads
+    logs = []
+    for ev in events:
+        payload = ev.payload or {}
+        logs.append({
+            "timestamp": ev.created_at.isoformat(),
+            "session_id": session_id,
+            "title": ev.title or "",
+            "severity": ev.severity or "medium",
+            "product_type": ev.product_type or "",
+            "technique_id": payload.get("technique_id", ""),
+            "tactic": payload.get("tactic", ""),
+            "host": payload.get("host", payload.get("hostname", "CORP-WS-001")),
+            "user": payload.get("user", payload.get("username", "")),
+            "src_ip": payload.get("src_ip", ""),
+            "dest_ip": payload.get("dest_ip", ""),
+            "process": payload.get("process", payload.get("cmdline", "")),
+            "sourcetype": "purplelab",
+            "index": "purplelab",
+            **payload,
+        })
+
+    mgr = ConnectionManager()
+    pushed = await mgr.push_logs(conn_id, logs)
+    return {
+        "pushed": pushed,
+        "total_events": len(events),
+        "connection_id": conn_id,
+        "connection_name": conn_name,
+        "siem_type": siem_type,
+        "message": f"Pushed {pushed} events to {conn_name}",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

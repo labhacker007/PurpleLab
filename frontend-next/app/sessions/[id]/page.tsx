@@ -21,6 +21,7 @@ import {
   Check,
   X,
   BookMarked,
+  Send,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -674,6 +675,29 @@ export default function SessionDetailPage() {
     }
   }
 
+  // ── Push to SIEM ──────────────────────────────────────────────────────────────
+  const [isPushingSIEM, setIsPushingSIEM] = useState(false)
+  const [siemPushResult, setSiemPushResult] = useState<{ pushed: number; connection_name: string } | null>(null)
+
+  async function handlePushToSIEM() {
+    if (!session || isPushingSIEM) return
+    setIsPushingSIEM(true)
+    setSiemPushResult(null)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v2/sessions/${session.id}/push-to-siem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { pushed: number; connection_name: string }
+        setSiemPushResult(data)
+        setTimeout(() => setSiemPushResult(null), 6000)
+      }
+    } catch { /* ignore */ }
+    finally { setIsPushingSIEM(false) }
+  }
+
   // ── Filtered events ───────────────────────────────────────────────────────────
   const filteredEvents = events.filter((e) => {
     if (severityFilter && e.severity !== severityFilter) return false
@@ -833,6 +857,27 @@ export default function SessionDetailPage() {
                 Export as CSV
               </button>
             </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handlePushToSIEM()}
+              disabled={isPushingSIEM || events.length === 0}
+              className="gap-1.5 text-xs border-violet-500/40 text-violet-400 hover:bg-violet-500/10 hover:text-violet-300"
+            >
+              {isPushingSIEM ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+              Push to SIEM
+            </Button>
+            {siemPushResult && (
+              <span className="text-[10px] text-green-400 font-mono">
+                ✓ {siemPushResult.pushed} events → {siemPushResult.connection_name}
+              </span>
+            )}
           </div>
         </div>
       </div>
