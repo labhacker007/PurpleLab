@@ -40,6 +40,7 @@ from backend.api.v2.normalization import router as normalization_router
 from backend.api.v2.ai_engine import router as ai_engine_router
 from backend.api.v2.scenarios import router as scenarios_router
 from backend.api.v2.itdr import router as itdr_router
+from backend.api.v2.threatforge import router as threatforge_router
 
 v2_router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -105,6 +106,7 @@ v2_router.include_router(cspm_router)
 v2_router.include_router(enterprise_import_router)
 # Environment templates, threat profiles, sigma library, normalization
 v2_router.include_router(environment_templates_router)
+v2_router.include_router(threatforge_router)
 v2_router.include_router(threat_profiles_router)
 v2_router.include_router(sigma_library_router)
 v2_router.include_router(normalization_router)

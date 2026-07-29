@@ -13,6 +13,10 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Zap,
+  Shield,
+  FileCode2,
+  ExternalLink,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -113,6 +117,21 @@ interface AttackChain {
   description: string
 }
 
+interface TFModel {
+  id: number
+  name: string
+  description?: string
+  framework: string
+  status: string
+  technique_ids: string[]
+  technique_count: number
+  sigma_count: number
+  threat_count: number
+  component_count: number
+  risk_score?: number
+  updated_at?: string
+}
+
 const FALLBACK_ATTACK_CHAINS: AttackChain[] = [
   { id: 'apt29', label: 'APT29 (Cozy Bear)', description: 'Russian nation-state TTPs' },
   { id: 'apt41', label: 'APT41', description: 'Chinese espionage + financial' },
@@ -121,6 +140,8 @@ const FALLBACK_ATTACK_CHAINS: AttackChain[] = [
   { id: 'lateral_movement', label: 'Lateral Movement', description: 'SMB/WMI spread techniques' },
   { id: 'cred_dumping', label: 'Credential Dumping', description: 'LSASS + SAM extraction' },
 ]
+
+type DialogTab = 'chains' | 'threatforge'
 
 function NewSessionDialog({
   open,
@@ -135,10 +156,41 @@ function NewSessionDialog({
   attackChains: AttackChain[]
   chainsLoading: boolean
 }) {
+  const [tab, setTab] = useState<DialogTab>('chains')
   const [name, setName] = useState('')
   const [chains, setChains] = useState<string[]>([])
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ThreatForge state
+  const [tfModels, setTfModels] = useState<TFModel[]>([])
+  const [tfLoading, setTfLoading] = useState(false)
+  const [tfConnected, setTfConnected] = useState<boolean | null>(null)
+  const [selectedTfModel, setSelectedTfModel] = useState<TFModel | null>(null)
+
+  useEffect(() => {
+    if (tab === 'threatforge' && tfConnected === null) {
+      void loadTfModels()
+    }
+  }, [tab])
+
+  async function loadTfModels() {
+    setTfLoading(true)
+    try {
+      const res = await authFetch(`${API_BASE}/api/v2/threatforge/models`)
+      if (res.ok) {
+        const data = (await res.json()) as { models: TFModel[]; total: number }
+        setTfModels(data.models)
+        setTfConnected(true)
+      } else {
+        setTfConnected(false)
+      }
+    } catch {
+      setTfConnected(false)
+    } finally {
+      setTfLoading(false)
+    }
+  }
 
   function toggleChain(id: string) {
     setChains((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]))
@@ -152,10 +204,25 @@ function NewSessionDialog({
     setError(null)
     setIsSaving(true)
     try {
+      let body: Record<string, unknown>
+      if (tab === 'threatforge' && selectedTfModel) {
+        body = {
+          name: name.trim(),
+          technique_ids: selectedTfModel.technique_ids,
+          config: {
+            source: 'threatforge',
+            threatforge_model_id: selectedTfModel.id,
+            threatforge_model_name: selectedTfModel.name,
+          },
+        }
+      } else {
+        body = { name: name.trim(), config: { attack_chains: chains } }
+      }
+
       const res = await authFetch(`${API_BASE}/api/v2/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), config: { attack_chains: chains } }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const data = (await res.json()) as { detail?: string }
@@ -164,6 +231,8 @@ function NewSessionDialog({
       const session = (await res.json()) as SimSession
       setName('')
       setChains([])
+      setSelectedTfModel(null)
+      setTab('chains')
       onCreated(session.id)
       onClose()
     } catch (err) {
@@ -172,6 +241,8 @@ function NewSessionDialog({
       setIsSaving(false)
     }
   }
+
+  const canCreate = name.trim() && (tab === 'chains' || (tab === 'threatforge' && selectedTfModel !== null))
 
   return (
     <Dialog open={open} onClose={onClose}>
@@ -194,47 +265,158 @@ function NewSessionDialog({
             autoFocus
           />
         </div>
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted uppercase tracking-wide flex items-center gap-1.5">
-            Attack chains
-            {chainsLoading && <Loader2 className="h-3 w-3 animate-spin text-muted" />}
-          </label>
-          <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-            {attackChains.map((chain) => {
-              const selected = chains.includes(chain.id)
-              return (
-                <button
-                  key={chain.id}
-                  type="button"
-                  onClick={() => toggleChain(chain.id)}
-                  className={cn(
-                    'flex w-full items-start gap-3 rounded-lg border p-2.5 text-left transition-colors',
-                    selected
-                      ? 'border-primary/50 bg-primary/10'
-                      : 'border-border hover:border-border/80 hover:bg-bg'
-                  )}
-                >
-                  <div className={cn('mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors', selected ? 'border-primary bg-primary' : 'border-border')}>
-                    {selected && (
-                      <svg viewBox="0 0 16 16" fill="none" className="h-full w-full p-0.5">
-                        <path d="M3 8l3.5 3.5L13 4.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-text">{chain.label}</p>
-                    <p className="text-xs text-muted">{chain.description}</p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+
+        {/* Tab switcher */}
+        <div className="flex items-center gap-1 rounded-lg border border-border p-1 bg-bg/60">
+          <button
+            type="button"
+            onClick={() => setTab('chains')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+              tab === 'chains' ? 'bg-primary text-white' : 'text-muted hover:text-text'
+            )}
+          >
+            <Zap className="h-3 w-3" />
+            Attack Chains
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('threatforge')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+              tab === 'threatforge' ? 'bg-violet-600 text-white' : 'text-muted hover:text-text'
+            )}
+          >
+            <Shield className="h-3 w-3" />
+            From ThreatForge
+          </button>
         </div>
+
+        {tab === 'chains' && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted uppercase tracking-wide flex items-center gap-1.5">
+              Attack chains
+              {chainsLoading && <Loader2 className="h-3 w-3 animate-spin text-muted" />}
+            </label>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {attackChains.map((chain) => {
+                const selected = chains.includes(chain.id)
+                return (
+                  <button
+                    key={chain.id}
+                    type="button"
+                    onClick={() => toggleChain(chain.id)}
+                    className={cn(
+                      'flex w-full items-start gap-3 rounded-lg border p-2.5 text-left transition-colors',
+                      selected
+                        ? 'border-primary/50 bg-primary/10'
+                        : 'border-border hover:border-border/80 hover:bg-bg'
+                    )}
+                  >
+                    <div className={cn('mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors', selected ? 'border-primary bg-primary' : 'border-border')}>
+                      {selected && (
+                        <svg viewBox="0 0 16 16" fill="none" className="h-full w-full p-0.5">
+                          <path d="M3 8l3.5 3.5L13 4.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-text">{chain.label}</p>
+                      <p className="text-xs text-muted">{chain.description}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {tab === 'threatforge' && (
+          <div className="space-y-2">
+            {tfLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-muted text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Connecting to ThreatForge…
+              </div>
+            ) : tfConnected === false ? (
+              <div className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-4 text-center">
+                <ExternalLink className="h-6 w-6 text-amber mx-auto mb-2" />
+                <p className="text-sm font-medium text-text">ThreatForge not reachable</p>
+                <p className="text-xs text-muted mt-1">Make sure ThreatForge is running on port 4000.</p>
+                <button onClick={() => void loadTfModels()} className="mt-2 text-xs text-primary hover:underline">
+                  Retry
+                </button>
+              </div>
+            ) : tfModels.length === 0 ? (
+              <div className="rounded-lg border border-border px-3 py-6 text-center">
+                <FileCode2 className="h-6 w-6 text-muted mx-auto mb-2" />
+                <p className="text-sm font-medium text-text">No threat models yet</p>
+                <p className="text-xs text-muted mt-1">Create a STRIDE model in ThreatForge first.</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                {tfModels.map((model) => {
+                  const selected = selectedTfModel?.id === model.id
+                  return (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => setSelectedTfModel(selected ? null : model)}
+                      className={cn(
+                        'flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+                        selected
+                          ? 'border-violet-500/50 bg-violet-500/10'
+                          : 'border-border hover:border-border/80 hover:bg-bg'
+                      )}
+                    >
+                      <div className={cn('mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 transition-colors', selected ? 'border-violet-500 bg-violet-500' : 'border-border')}>
+                        {selected && <div className="h-full w-full rounded-full bg-white scale-50" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-text truncate">{model.name}</p>
+                          <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-400 uppercase">
+                            {model.framework}
+                          </span>
+                        </div>
+                        {model.description && (
+                          <p className="text-xs text-muted mt-0.5 line-clamp-2">{model.description}</p>
+                        )}
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <span className="text-[10px] text-blue font-mono">{model.technique_count} techniques</span>
+                          <span className="text-[10px] text-green font-mono">{model.sigma_count} sigma rules</span>
+                          <span className="text-[10px] text-amber font-mono">{model.threat_count} threats</span>
+                          {model.risk_score && (
+                            <span className="text-[10px] text-red font-mono">risk {model.risk_score.toFixed(1)}</span>
+                          )}
+                        </div>
+                        {selected && model.technique_ids.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {model.technique_ids.slice(0, 8).map((t) => (
+                              <span key={t} className="rounded bg-violet-500/20 px-1 py-0.5 text-[10px] font-mono text-violet-300">{t}</span>
+                            ))}
+                            {model.technique_ids.length > 8 && (
+                              <span className="text-[10px] text-muted">+{model.technique_ids.length - 8} more</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onClose} disabled={isSaving}>Cancel</Button>
-        <Button onClick={() => void handleCreate()} disabled={isSaving || !name.trim()}>
-          {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</> : 'Create Session'}
+        <Button
+          onClick={() => void handleCreate()}
+          disabled={isSaving || !canCreate}
+          className={tab === 'threatforge' ? 'bg-violet-600 hover:bg-violet-700 text-white' : ''}
+        >
+          {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : 'Create Session'}
         </Button>
       </DialogFooter>
     </Dialog>
