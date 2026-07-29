@@ -154,6 +154,48 @@ const ATTACK_CHAINS = [
   { id: "persistence", label: "Persistence & C2" },
 ]
 
+// ── Infrastructure Palette ────────────────────────────────────────────────────
+
+const INFRA_PALETTE = {
+  endpoints: [
+    { id: "endpoint-windows", label: "Windows Endpoint", subtype: "endpoint", variant: "windows", icon: "🖥️", user_count: 1 },
+    { id: "endpoint-linux", label: "Linux Server", subtype: "endpoint", variant: "linux", icon: "🐧", user_count: 0 },
+    { id: "endpoint-mac", label: "macOS Endpoint", subtype: "endpoint", variant: "macos", icon: "🍎", user_count: 1 },
+    { id: "endpoint-dc", label: "Domain Controller", subtype: "endpoint", variant: "windows-dc", icon: "🏢", user_count: 0 },
+    { id: "endpoint-server", label: "Windows Server", subtype: "endpoint", variant: "windows-server", icon: "🖧", user_count: 0 },
+  ],
+  cloud: [
+    { id: "cloud-aws", label: "AWS Account", subtype: "cloud", variant: "aws", icon: "🔶", services: ["cloudtrail", "guardduty"] },
+    { id: "cloud-azure", label: "Azure Tenant", subtype: "cloud", variant: "azure", icon: "🔷", services: ["aad", "defender"] },
+    { id: "cloud-gcp", label: "GCP Project", subtype: "cloud", variant: "gcp", icon: "🔵", services: ["cloudlogging"] },
+  ],
+  email: [
+    { id: "email-exchange", label: "Exchange Online", subtype: "email", variant: "exchange", icon: "📧" },
+    { id: "email-gsuite", label: "Google Workspace", subtype: "email", variant: "gsuite", icon: "✉️" },
+    { id: "email-proofpoint", label: "Proofpoint", subtype: "email", variant: "proofpoint", icon: "🛡️" },
+    { id: "email-mimecast", label: "Mimecast", subtype: "email", variant: "mimecast", icon: "🛡️" },
+  ],
+  edr: [
+    { id: "edr-crowdstrike", label: "CrowdStrike Falcon", subtype: "edr", variant: "crowdstrike", icon: "🦅" },
+    { id: "edr-defender", label: "Defender for Endpoint", subtype: "edr", variant: "defender", icon: "🛡️" },
+    { id: "edr-sentinelone", label: "SentinelOne Agent", subtype: "edr", variant: "sentinelone", icon: "🔵" },
+    { id: "edr-carbonblack", label: "Carbon Black Agent", subtype: "edr", variant: "carbonblack", icon: "⬛" },
+    { id: "edr-xsiam", label: "Cortex XDR Agent", subtype: "edr", variant: "xsiam", icon: "🔴" },
+  ],
+  itsm: [
+    { id: "itsm-servicenow", label: "ServiceNow CMDB", subtype: "itsm", variant: "servicenow", icon: "🎫" },
+    { id: "itsm-jira", label: "Jira Service Mgmt", subtype: "itsm", variant: "jira", icon: "🟦" },
+  ],
+}
+
+const INFRA_TYPE_CONFIG: Record<string, { label: string; border: string; bg: string; badge: string; handleColor: string }> = {
+  endpoint: { label: "Endpoint", border: "border-violet-500/60", bg: "bg-violet-950/40", badge: "text-violet-300 bg-violet-500/20", handleColor: "!bg-violet-500" },
+  cloud:    { label: "Cloud",    border: "border-sky-500/60",    bg: "bg-sky-950/40",    badge: "text-sky-300 bg-sky-500/20",    handleColor: "!bg-sky-500" },
+  email:    { label: "Email",    border: "border-teal-500/60",   bg: "bg-teal-950/40",   badge: "text-teal-300 bg-teal-500/20",  handleColor: "!bg-teal-500" },
+  edr:      { label: "EDR",     border: "border-emerald-500/60", bg: "bg-emerald-950/40", badge: "text-emerald-300 bg-emerald-500/20", handleColor: "!bg-emerald-500" },
+  itsm:     { label: "ITSM",    border: "border-orange-500/60",  bg: "bg-orange-950/40",  badge: "text-orange-300 bg-orange-500/20",  handleColor: "!bg-orange-500" },
+}
+
 // ── Custom Node Components ────────────────────────────────────────────────────
 
 function LogSourceNode({ data, selected }: { data: Record<string, unknown>; selected: boolean }) {
@@ -302,11 +344,68 @@ function UseCaseNode({ data, selected }: { data: Record<string, unknown>; select
   )
 }
 
+// ── Infrastructure Node (endpoints, cloud, email, EDR, ITSM) ─────────────────
+
+function InfraNode({ data, selected }: { data: Record<string, unknown>; selected: boolean }) {
+  const subtype = String(data.subtype ?? "endpoint")
+  const label = String(data.label ?? "Infrastructure")
+  const hostname = data.hostname ? String(data.hostname) : ""
+  const ip = data.ip ? String(data.ip) : ""
+  const userCount = data.user_count != null ? Number(data.user_count) : null
+  const icon = String(data.icon ?? "🖥️")
+  const services = Array.isArray(data.services) ? (data.services as string[]) : []
+
+  const cfg = INFRA_TYPE_CONFIG[subtype] ?? INFRA_TYPE_CONFIG.endpoint
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border-2 px-4 py-3 min-w-[160px] shadow-lg transition-all",
+        cfg.bg, cfg.border,
+        selected && "ring-2 ring-white/20"
+      )}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        className={cn("!w-3 !h-3 !border-2 !border-slate-900", cfg.handleColor)}
+      />
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-base leading-none">{icon}</span>
+        <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider", cfg.badge)}>
+          {cfg.label}
+        </span>
+      </div>
+      <div className="text-xs font-semibold text-slate-100 leading-tight">{label}</div>
+      {hostname && <div className="text-[10px] font-mono text-slate-400 mt-0.5">{hostname}</div>}
+      {ip && <div className="text-[10px] font-mono text-slate-500">{ip}</div>}
+      {userCount != null && userCount > 0 && (
+        <div className="text-[9px] text-slate-500 mt-1 flex items-center gap-1">
+          <Users className="h-2.5 w-2.5" />{userCount} user{userCount !== 1 ? "s" : ""}
+        </div>
+      )}
+      {services.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {services.slice(0, 3).map((s) => (
+            <span key={s} className="text-[8px] font-mono bg-slate-800/80 text-slate-400 px-1 rounded">{s}</span>
+          ))}
+        </div>
+      )}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={cn("!w-3 !h-3 !border-2 !border-slate-900", cfg.handleColor)}
+      />
+    </div>
+  )
+}
+
 const nodeTypes: NodeTypes = {
   logSource: LogSourceNode,
   siem: SIEMNode,
   detectionRule: DetectionRuleNode,
   useCase: UseCaseNode,
+  infra: InfraNode,
 }
 
 // ── Auto-layout helpers ───────────────────────────────────────────────────────
@@ -1693,6 +1792,99 @@ function PaletteSidebar({ rules }: { rules: ApiRule[] }) {
           )}
         </div>
 
+        {/* INFRASTRUCTURE */}
+        <div>
+          <button
+            onClick={() => toggleSection("infra")}
+            className="w-full flex items-center justify-between px-4 py-2.5 text-[10px] font-bold text-violet-400/80 uppercase tracking-widest hover:text-violet-300 transition-colors"
+          >
+            ⚙ Infrastructure
+            <ChevronRight className={cn("h-3 w-3 transition-transform", !collapsed.infra && "rotate-90")} />
+          </button>
+          {!collapsed.infra && (
+            <div className="px-3 pb-3 space-y-3">
+              {/* Endpoints */}
+              <div>
+                <div className="text-[9px] text-slate-600 uppercase tracking-widest font-bold px-1 mb-1.5">Endpoints</div>
+                <div className="space-y-1">
+                  {INFRA_PALETTE.endpoints.map((item) => (
+                    <div key={item.id} draggable
+                      onDragStart={(e) => onDragStartItem(e, "infra", { ...item, hostname: "", ip: "" })}
+                      className="flex items-center gap-2 rounded-lg border border-violet-900/50 bg-violet-950/20 px-2.5 py-1.5 text-[10px] text-violet-300 cursor-grab active:cursor-grabbing hover:border-violet-500/50 hover:bg-violet-950/40 transition-all"
+                    >
+                      <span className="text-sm leading-none">{item.icon}</span>
+                      <span className="font-medium truncate">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Cloud Accounts */}
+              <div>
+                <div className="text-[9px] text-slate-600 uppercase tracking-widest font-bold px-1 mb-1.5">Cloud Accounts</div>
+                <div className="space-y-1">
+                  {INFRA_PALETTE.cloud.map((item) => (
+                    <div key={item.id} draggable
+                      onDragStart={(e) => onDragStartItem(e, "infra", { ...item, hostname: "", ip: "" })}
+                      className="flex items-center gap-2 rounded-lg border border-sky-900/50 bg-sky-950/20 px-2.5 py-1.5 text-[10px] text-sky-300 cursor-grab active:cursor-grabbing hover:border-sky-500/50 hover:bg-sky-950/40 transition-all"
+                    >
+                      <span className="text-sm leading-none">{item.icon}</span>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{item.label}</div>
+                        <div className="text-[8px] text-sky-500/70">{(item.services ?? []).join(", ")}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Email Platforms */}
+              <div>
+                <div className="text-[9px] text-slate-600 uppercase tracking-widest font-bold px-1 mb-1.5">Email Platforms</div>
+                <div className="space-y-1">
+                  {INFRA_PALETTE.email.map((item) => (
+                    <div key={item.id} draggable
+                      onDragStart={(e) => onDragStartItem(e, "infra", { ...item, hostname: "", ip: "" })}
+                      className="flex items-center gap-2 rounded-lg border border-teal-900/50 bg-teal-950/20 px-2.5 py-1.5 text-[10px] text-teal-300 cursor-grab active:cursor-grabbing hover:border-teal-500/50 hover:bg-teal-950/40 transition-all"
+                    >
+                      <span className="text-sm leading-none">{item.icon}</span>
+                      <span className="font-medium truncate">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* EDR Sensors */}
+              <div>
+                <div className="text-[9px] text-slate-600 uppercase tracking-widest font-bold px-1 mb-1.5">EDR Sensors</div>
+                <div className="space-y-1">
+                  {INFRA_PALETTE.edr.map((item) => (
+                    <div key={item.id} draggable
+                      onDragStart={(e) => onDragStartItem(e, "infra", { ...item, hostname: "", ip: "" })}
+                      className="flex items-center gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-2.5 py-1.5 text-[10px] text-emerald-300 cursor-grab active:cursor-grabbing hover:border-emerald-500/50 hover:bg-emerald-950/40 transition-all"
+                    >
+                      <span className="text-sm leading-none">{item.icon}</span>
+                      <span className="font-medium truncate">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* ITSM / CMDB */}
+              <div>
+                <div className="text-[9px] text-slate-600 uppercase tracking-widest font-bold px-1 mb-1.5">ITSM / CMDB</div>
+                <div className="space-y-1">
+                  {INFRA_PALETTE.itsm.map((item) => (
+                    <div key={item.id} draggable
+                      onDragStart={(e) => onDragStartItem(e, "infra", { ...item, hostname: "", ip: "" })}
+                      className="flex items-center gap-2 rounded-lg border border-orange-900/50 bg-orange-950/20 px-2.5 py-1.5 text-[10px] text-orange-300 cursor-grab active:cursor-grabbing hover:border-orange-500/50 hover:bg-orange-950/40 transition-all"
+                    >
+                      <span className="text-sm leading-none">{item.icon}</span>
+                      <span className="font-medium truncate">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* USE CASES */}
         <div>
           <button
@@ -1761,6 +1953,7 @@ export default function EnvironmentCanvasPage({
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [deploying, setDeploying] = useState(false)
 
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null)
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null)
@@ -1963,6 +2156,49 @@ export default function EnvironmentCanvasPage({
     }
   }
 
+  // ── Deploy — populate CMDB assets from infrastructure nodes ─────────────────
+
+  async function handleDeploy() {
+    const infraNodes = nodes.filter((n) => n.type === "infra")
+    if (infraNodes.length === 0) return
+    setDeploying(true)
+    try {
+      // Auto-save topology first
+      await authFetch(`${API_BASE}/api/v2/environments/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: envName, settings: { canvas_topology: { nodes, edges } } }),
+      })
+      // Deploy infrastructure — creates asset records from endpoint/cloud nodes
+      const res = await authFetch(`${API_BASE}/api/v2/environments/${id}/deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          infrastructure: infraNodes.map((n) => ({
+            node_id: n.id,
+            subtype: n.data.subtype,
+            variant: n.data.variant,
+            label: n.data.label,
+            hostname: n.data.hostname ?? "",
+            ip: n.data.ip ?? "",
+            user_count: n.data.user_count ?? 0,
+            services: n.data.services ?? [],
+          })),
+        }),
+      })
+      if (res.ok) {
+        const result = (await res.json()) as { assets_created: number; message?: string }
+        setToast({ message: `Deployed: ${result.assets_created} assets registered in CMDB`, type: "success" })
+      } else {
+        setToast({ message: "Deploy failed — check backend logs", type: "error" })
+      }
+    } catch {
+      setToast({ message: "Deploy error", type: "error" })
+    } finally {
+      setDeploying(false)
+    }
+  }
+
   // ── Simulate ────────────────────────────────────────────────────────────────
 
   async function handleStartSim(cfg: SimConfig) {
@@ -1976,11 +2212,18 @@ export default function EnvironmentCanvasPage({
         mcpUrl = `${API_BASE}/api/v2/mcp`
       }
 
+      // Extract infrastructure nodes from canvas for backend log routing
+      const canvasInfra = nodes
+        .filter((n) => n.type === "infra")
+        .map((n) => ({ id: n.id, subtype: n.data.subtype, variant: n.data.variant, label: n.data.label, services: n.data.services ?? [] }))
+
       const body: Record<string, unknown> = {
         environment_id: id,
         simulation_mode: cfg.mode,
         event_count: durationMap[cfg.duration],
         auto_start: true,
+        // infrastructure topology from canvas
+        canvas_infrastructure: canvasInfra,
         // attack_chain
         attack_chains: cfg.chains,
         // threat_actor
@@ -2098,6 +2341,16 @@ export default function EnvironmentCanvasPage({
         </Button>
         <Button
           size="sm"
+          onClick={() => void handleDeploy()}
+          disabled={deploying || nodes.filter((n) => n.type === "infra").length === 0}
+          className="border-emerald-700/50 text-emerald-400 hover:border-emerald-500 hover:text-emerald-300 gap-1.5"
+          title="Deploy environment — auto-populate CMDB from infrastructure nodes"
+        >
+          {deploying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Server className="h-3.5 w-3.5" />}
+          Deploy
+        </Button>
+        <Button
+          size="sm"
           onClick={() => setShowSimModal(true)}
           className="bg-violet-600 hover:bg-violet-500 text-white gap-1.5"
         >
@@ -2153,11 +2406,14 @@ export default function EnvironmentCanvasPage({
             />
             <MiniMap
               nodeColor={(node) => {
+                if (node.type === "infra") {
+                  const subtypeColors: Record<string, string> = {
+                    endpoint: "#7c3aed", cloud: "#0284c7", email: "#0d9488", edr: "#059669", itsm: "#ea580c",
+                  }
+                  return subtypeColors[String(node.data?.subtype ?? "")] ?? "#6d28d9"
+                }
                 const colors: Record<string, string> = {
-                  logSource: "#7c3aed",
-                  siem: "#2563eb",
-                  detectionRule: "#16a34a",
-                  useCase: "#d97706",
+                  logSource: "#7c3aed", siem: "#2563eb", detectionRule: "#16a34a", useCase: "#d97706",
                 }
                 return colors[node.type ?? ""] ?? "#4b5563"
               }}

@@ -48,6 +48,8 @@ class SessionCreateRequest(BaseModel):
     mcp_api_key: str | None = None
     mcp_tool: str = Field("siem_search_events")
     mcp_query: str | None = None
+    # Canvas infrastructure nodes — drives log source selection
+    canvas_infrastructure: list[dict] = Field(default_factory=list)
     # Auto-start after creation
     auto_start: bool = False
 
@@ -118,6 +120,10 @@ async def create_session(req: SessionCreateRequest):
     })
     if req.environment_id:
         merged_config["environment_id"] = req.environment_id
+    if req.canvas_infrastructure:
+        merged_config["canvas_infrastructure"] = req.canvas_infrastructure
+        # Derive log sources from infrastructure nodes for event generation
+        merged_config["infra_log_sources"] = _derive_log_sources_from_infra(req.canvas_infrastructure)
     if req.threat_actor_id:
         merged_config["threat_actor_id"] = req.threat_actor_id
         merged_config["threat_actor_name"] = req.threat_actor_name or req.threat_actor_id
@@ -667,6 +673,42 @@ async def get_session_context(session_id: str):
         except Exception:
             pass
     return {"session_id": session_id, "context": ctx or {}}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _derive_log_sources_from_infra(infra_nodes: list[dict]) -> list[str]:
+    """Map canvas infrastructure nodes to log source IDs for event generation."""
+    _SOURCE_MAP: dict[str, list[str]] = {
+        "endpoint:windows":         ["windows_security", "windows_sysmon"],
+        "endpoint:windows-dc":      ["windows_security", "windows_sysmon", "ad_audit"],
+        "endpoint:windows-server":  ["windows_security", "windows_sysmon", "iis_access"],
+        "endpoint:linux":           ["linux_auth", "linux_syslog", "auditd"],
+        "endpoint:macos":           ["macos_unified_log"],
+        "cloud:aws":                ["aws_cloudtrail", "aws_guardduty", "aws_vpc_flow"],
+        "cloud:azure":              ["azure_activity", "azure_signin", "azure_defender"],
+        "cloud:gcp":                ["gcp_cloudaudit", "gcp_cloudlogging"],
+        "email:exchange":           ["exchange_messagetracking", "exchange_audit"],
+        "email:gsuite":             ["gsuite_login", "gsuite_admin"],
+        "email:proofpoint":         ["proofpoint_tap"],
+        "edr:crowdstrike":          ["crowdstrike"],
+        "edr:defender":             ["defender_atp"],
+        "edr:sentinelone":          ["sentinelone"],
+        "edr:carbonblack":          ["carbonblack_defense"],
+        "edr:xsiam":                ["xsiam_xdr"],
+        "itsm:servicenow":          ["servicenow_incidents"],
+        "itsm:jira":                ["jira_audit"],
+    }
+    sources: set[str] = set()
+    for node in infra_nodes:
+        subtype = node.get("subtype", "")
+        variant = node.get("variant", "")
+        key = f"{subtype}:{variant}"
+        for src in _SOURCE_MAP.get(key, []):
+            sources.add(src)
+    return list(sources)
 
 
 # ---------------------------------------------------------------------------

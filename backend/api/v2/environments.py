@@ -323,6 +323,138 @@ async def get_environment_log_sources(environment_id: str):
     }
 
 
+class InfraNodeDeploy(BaseModel):
+    node_id: str
+    subtype: str  # endpoint | cloud | email | edr | itsm
+    variant: str  # windows | linux | aws | azure | crowdstrike ...
+    label: str
+    hostname: str = ""
+    ip: str = ""
+    user_count: int = 0
+    services: list[str] = Field(default_factory=list)
+
+
+class DeployRequest(BaseModel):
+    infrastructure: list[InfraNodeDeploy] = Field(default_factory=list)
+
+
+@router.post("/{environment_id}/deploy")
+async def deploy_environment(environment_id: str, req: DeployRequest):
+    """Deploy an environment — creates asset records in CMDB from infrastructure nodes.
+
+    Each dropped infrastructure node (endpoint, cloud account, email platform, EDR sensor,
+    ITSM) becomes a registered asset. These assets are used by the simulation engine to
+    generate realistic, host-specific log events and by the CMDB integration to populate
+    asset inventory.
+    """
+    import re
+    import random
+
+    try:
+        uid = uuid.UUID(environment_id)
+    except ValueError:
+        raise HTTPException(400, detail="Invalid environment ID.")
+
+    # Load environment to verify it exists + get current assets
+    async with async_session() as session:
+        result = await session.execute(select(Environment).where(Environment.id == uid))
+        env = result.scalar_one_or_none()
+        if not env:
+            raise HTTPException(404, detail=f"Environment '{environment_id}' not found.")
+
+    assets_created = 0
+    asset_list = []
+
+    for node in req.infrastructure:
+        # Generate realistic asset metadata from node config
+        hostname = node.hostname or _generate_hostname(node.subtype, node.variant, assets_created)
+        ip = node.ip or _generate_ip(node.subtype, assets_created)
+
+        asset = {
+            "node_id": node.node_id,
+            "subtype": node.subtype,
+            "variant": node.variant,
+            "label": node.label,
+            "hostname": hostname,
+            "ip": ip,
+            "user_count": node.user_count,
+            "services": node.services,
+            # Log sources that this asset will generate
+            "log_sources": _map_node_to_log_sources(node.subtype, node.variant, node.services),
+        }
+        asset_list.append(asset)
+        assets_created += 1
+
+    # Persist deployed assets into environment settings
+    async with async_session() as session:
+        result = await session.execute(select(Environment).where(Environment.id == uid))
+        env = result.scalar_one_or_none()
+        if env:
+            settings = dict(env.settings or {})
+            settings["deployed_assets"] = asset_list
+            settings["deployed_at"] = datetime.utcnow().isoformat()
+            env.settings = settings
+            env.updated_at = datetime.utcnow()
+            await session.commit()
+
+    return {
+        "environment_id": environment_id,
+        "assets_created": assets_created,
+        "assets": asset_list,
+        "message": f"Deployed {assets_created} assets. CMDB populated. Log sources mapped.",
+    }
+
+
+def _generate_hostname(subtype: str, variant: str, index: int) -> str:
+    prefixes = {
+        "endpoint": {"windows": "CORP-WS", "windows-dc": "CORP-DC", "windows-server": "CORP-SRV", "linux": "CORP-LX", "macos": "CORP-MAC"},
+        "cloud": {"aws": "AWS-ACCT", "azure": "AZ-TENANT", "gcp": "GCP-PROJ"},
+        "email": {"exchange": "EXCH-SRV", "gsuite": "GSUITE", "proofpoint": "PP-GW", "mimecast": "MC-GW"},
+        "edr": {"crowdstrike": "CS-SENSOR", "defender": "MDE-AGENT", "sentinelone": "S1-AGENT", "carbonblack": "CB-AGENT", "xsiam": "XDR-AGENT"},
+        "itsm": {"servicenow": "SNOW-CMDB", "jira": "JIRA-JSM"},
+    }
+    prefix = prefixes.get(subtype, {}).get(variant, "NODE")
+    return f"{prefix}-{index + 1:03d}"
+
+
+def _generate_ip(subtype: str, index: int) -> str:
+    base = {"endpoint": "10.10.1", "cloud": "10.20.0", "email": "10.10.3", "edr": "10.10.1", "itsm": "10.10.4"}
+    third = base.get(subtype, "10.99.0")
+    return f"{third}.{(index % 254) + 1}"
+
+
+def _map_node_to_log_sources(subtype: str, variant: str, services: list[str]) -> list[str]:
+    mapping: dict[str, list[str]] = {
+        "endpoint:windows": ["windows_security", "windows_sysmon", "windows_system"],
+        "endpoint:windows-dc": ["windows_security", "windows_sysmon", "windows_system", "ad_audit"],
+        "endpoint:windows-server": ["windows_security", "windows_sysmon", "iis_access"],
+        "endpoint:linux": ["linux_auth", "linux_syslog", "auditd"],
+        "endpoint:macos": ["macos_unified_log", "macos_edr"],
+        "cloud:aws": ["aws_cloudtrail", "aws_guardduty", "aws_vpc_flow"],
+        "cloud:azure": ["azure_activity", "azure_signin", "azure_defender"],
+        "cloud:gcp": ["gcp_cloudaudit", "gcp_cloudlogging"],
+        "email:exchange": ["exchange_messagetracking", "exchange_audit"],
+        "email:gsuite": ["gsuite_login", "gsuite_drive", "gsuite_admin"],
+        "email:proofpoint": ["proofpoint_tap", "proofpoint_filter"],
+        "email:mimecast": ["mimecast_email", "mimecast_threat"],
+        "edr:crowdstrike": ["crowdstrike_falcon", "crowdstrike_dnr"],
+        "edr:defender": ["defender_atp", "defender_edr"],
+        "edr:sentinelone": ["sentinelone_threats", "sentinelone_activity"],
+        "edr:carbonblack": ["carbonblack_defense", "carbonblack_audit"],
+        "edr:xsiam": ["xsiam_xdr", "xsiam_cortex"],
+        "itsm:servicenow": ["servicenow_incidents", "servicenow_cmdb"],
+        "itsm:jira": ["jira_issues", "jira_audit"],
+    }
+    key = f"{subtype}:{variant}"
+    sources = list(mapping.get(key, [f"{subtype}_{variant}"]))
+    # Add cloud service-specific sources
+    for svc in services:
+        svc_map = {"guardduty": "aws_guardduty", "cloudtrail": "aws_cloudtrail", "aad": "azure_signin", "defender": "azure_defender"}
+        if svc in svc_map and svc_map[svc] not in sources:
+            sources.append(svc_map[svc])
+    return sources
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
