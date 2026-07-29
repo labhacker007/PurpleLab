@@ -1,8 +1,33 @@
 # PurpleLab v2 — Architecture & Capability Reference
 
-**Last updated:** 2026-03-28
+**Last updated:** 2026-07-29 (originally 2026-03-28)
 **Purpose:** Single source of truth for what is built, what is stubbed, and how every component connects.
 **See also:** [VISION_AND_MASTER_PLAN.md](VISION_AND_MASTER_PLAN.md) — full platform vision with 50+ log sources, scoring models, Joti integration, and HITL workflows.
+
+---
+
+## Jul 2026 Additions (appended; see original sections for full context)
+
+The following features were built in Jul 2026 and are not reflected in the original section text below. **CLAUDE.md is the authoritative source for these.** This block is a quick-reference changelog.
+
+### ThreatForge → PurpleLab Integration
+- Proxy layer at `backend/api/v2/threatforge.py`: `GET /api/v2/threatforge/{health,models,models/{id}}` — forwards to ThreatForge at `THREATFORGE_URL` (default `http://host.docker.internal:4000`).
+- `NewSessionDialog` in `frontend-next/app/sessions/page.tsx` extended with two-tab layout — **Attack Chains** | **From ThreatForge**. The ThreatForge tab fetches live models, shows technique/sigma/threat counts + risk score, and creates a session with `technique_ids` extracted from the model's `mitre_techniques` array. Session config stores `source: "threatforge"`, `threatforge_model_id`, `threatforge_model_name`.
+- Canvas bug fix: template topologies that store `nodes` as `string[]` no longer crash React Flow (guard added).
+
+### Infrastructure Canvas + Deploy
+- `frontend-next/app/environments/[id]/page.tsx`: drag-and-drop palette with 5 infra node categories — Endpoints (Windows/Linux/Mac/DC/Server), Cloud (AWS/Azure/GCP), Email (Exchange/GSuite/Proofpoint/Mimecast), EDR (CrowdStrike/Defender/SentinelOne/CarbonBlack/XSIAM), ITSM (ServiceNow/Jira).
+- `InfraNode` custom React Flow node: color-coded by subtype, exposes hostname/IP/users/services fields.
+- "Deploy" button: `POST /api/v2/environments/{id}/deploy` (in `backend/api/v2/environments.py`) auto-generates hostnames/IPs and maps infra nodes to CMDB asset records. Canvas nodes wire into session creation via `canvas_infrastructure` → `_derive_log_sources_from_infra()` → `infra_log_sources` in session `merged_config`.
+
+### Push to SIEM
+- `POST /api/v2/sessions/{id}/push-to-siem` (in `backend/api/v2/sessions.py`): collects `GeneratedEvent` records, auto-creates a Splunk sim connection if none exists, calls `ConnectionManager.push_logs()`.
+- `backend/api/vendor/splunk.py`: full HEC at `POST /services/collector/event` (newline-delimited JSON), stores in `_HEC_EVENTS`, auto-creates notable events from high/critical severity. `GET /services/collector/health[/1.0]` returns `{"text":"HEC is healthy","code":17}`.
+- Frontend button in session detail page (`frontend-next/app/sessions/[id]/page.tsx`) shows loading state then event count + connection name on success.
+
+### User Guide Page
+- `frontend-next/app/guide/page.tsx`: 4-tab help page — Vendor APIs (all 16 vendors with endpoints + auth), Seed Data, Connecting from Joti, Workflows.
+- Sidebar link added in `frontend-next/components/sidebar.tsx` before Settings.
 
 ---
 

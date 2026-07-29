@@ -71,6 +71,7 @@ This file is the primary reference for autonomous Claude Code operation on Purpl
 - **EDR State Machine is a singleton registry** — `get_machine(session_id)` returns a cached `EndpointStateMachine`. Call `drop_machine(session_id)` when a session is deleted.
 - **Vendor APIs are pure emulations** — `backend/api/vendor/` contains 16 vendor emulations (Splunk, XSIAM, CrowdStrike, Defender, QRadar, Carbon Black, Okta, Entra ID, Elastic, SentinelOne, Panorama, ServiceNow, Jira, Tenable, Wiz, Qualys). They read from `GeneratedEvent` rows for the given `session_id`. Never add real API credentials here.
 - **Splunk HEC emulation** — `POST /api/vendor/splunk/services/collector/event` stores events in `_HEC_EVENTS` in-memory dict; auto-creates notable events from high/critical severity with technique_ids. `GET /services/collector/health[/1.0]` returns `{"text": "HEC is healthy", "code": 17}`.
+- **Push to SIEM** — `POST /api/v2/sessions/{id}/push-to-siem` collects `GeneratedEvent` records for the session, auto-creates a Splunk sim SIEM connection if none exists, then calls `ConnectionManager.push_logs()` to forward events via HEC. Frontend button in session detail shows event count + connection name on success. Backend in `backend/api/v2/sessions.py`.
 - **ThreatForge proxy** — `backend/api/v2/threatforge.py` proxies to ThreatForge API at `THREATFORGE_URL` (default: `http://host.docker.internal:4000`). No auth required (ThreatForge dev mode). Exposes: `GET /api/v2/threatforge/{health,models,models/{id}}`.
 - **Infrastructure canvas** — environment canvas at `/environments/{id}` supports 5 infra node categories. Canvas nodes flow into session creation via `canvas_infrastructure` field → `_derive_log_sources_from_infra()` → stored in `merged_config.infra_log_sources`. Deploy button creates CMDB asset records via `POST /api/v2/environments/{id}/deploy`.
 - **XSIAM dual-field compat** — `/xql/get_query_results` accepts both `query_id` (Joti adapter) and `execution_id` (XSIAM native). `/indicators/insert_jsons` accepts both `json_indicators` and `json_objects`. Maintain both.
@@ -94,6 +95,7 @@ This file is the primary reference for autonomous Claude Code operation on Purpl
 | Backend Module | API Prefix | Frontend Page | Purpose |
 |---------------|------------|---------------|---------|
 | `api/sessions.py` | `/api/v2/sessions` | `/sessions` | SimulationSession CRUD + start/stop/pause |
+| `api/sessions.py` (push) | `/api/v2/sessions/{id}/push-to-siem` | (session detail "Push to SIEM" button) | Forward GeneratedEvent records to Splunk HEC; auto-creates connection if none exists |
 | `engine/edr_state_machine.py` | (internal) | — | 6-state EDR lifecycle (ONLINE→ISOLATED) |
 | `engine/action_executor.py` | (via sessions) | — | 11 SOAR actions (isolate_host, block_ioc, etc.) |
 | `engine/attack_chains/` | `/api/v2/attack-chains` | `/attack-chains` | Multi-step TTP execution chains |
@@ -149,6 +151,11 @@ This file is the primary reference for autonomous Claude Code operation on Purpl
 | `joti/webhook.py` | `/api/v2/joti` | — | Inbound Joti audit events + auto UseCaseRun |
 | `threat_intel/routes.py` | `/api/v2/threat-intel` | `/threat-intel` | IOC/TTP intel management |
 | `knowledge/routes.py` | `/api/v2/knowledge` | `/knowledge` | RAG knowledge base |
+
+### Help & Documentation Domain
+| Frontend File | Frontend Page | Purpose |
+|--------------|---------------|---------|
+| `frontend-next/app/guide/page.tsx` | `/guide` | User Guide — 4 tabs: Vendor APIs (all 16 vendors + endpoints + auth), Seed Data, Connecting from Joti, Workflows; sidebar link added before Settings |
 
 ### Infrastructure Domain
 | Backend Module | API Prefix | Frontend Page | Purpose |
