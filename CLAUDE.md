@@ -69,7 +69,10 @@ This file is the primary reference for autonomous Claude Code operation on Purpl
 - **Alembic dual-head** — migration chain has two active heads: `013_sec_intel` (main) and `003ret` (retired orphan). Always run `alembic upgrade 013_sec_intel` not `alembic upgrade head`.
 - **Celery workers share the backend image** — `purplelab-worker` and `purplelab-beat` use the same `purplelab-backend` image. Rebuilding backend rebuilds all three.
 - **EDR State Machine is a singleton registry** — `get_machine(session_id)` returns a cached `EndpointStateMachine`. Call `drop_machine(session_id)` when a session is deleted.
-- **Vendor APIs are pure emulations** — `backend/api/vendor/` contains Splunk, XSIAM, CrowdStrike, and Defender emulations. They read from `GeneratedEvent` rows for the given `session_id`. Never add real API credentials here.
+- **Vendor APIs are pure emulations** — `backend/api/vendor/` contains 16 vendor emulations (Splunk, XSIAM, CrowdStrike, Defender, QRadar, Carbon Black, Okta, Entra ID, Elastic, SentinelOne, Panorama, ServiceNow, Jira, Tenable, Wiz, Qualys). They read from `GeneratedEvent` rows for the given `session_id`. Never add real API credentials here.
+- **Splunk HEC emulation** — `POST /api/vendor/splunk/services/collector/event` stores events in `_HEC_EVENTS` in-memory dict; auto-creates notable events from high/critical severity with technique_ids. `GET /services/collector/health[/1.0]` returns `{"text": "HEC is healthy", "code": 17}`.
+- **ThreatForge proxy** — `backend/api/v2/threatforge.py` proxies to ThreatForge API at `THREATFORGE_URL` (default: `http://host.docker.internal:4000`). No auth required (ThreatForge dev mode). Exposes: `GET /api/v2/threatforge/{health,models,models/{id}}`.
+- **Infrastructure canvas** — environment canvas at `/environments/{id}` supports 5 infra node categories. Canvas nodes flow into session creation via `canvas_infrastructure` field → `_derive_log_sources_from_infra()` → stored in `merged_config.infra_log_sources`. Deploy button creates CMDB asset records via `POST /api/v2/environments/{id}/deploy`.
 - **XSIAM dual-field compat** — `/xql/get_query_results` accepts both `query_id` (Joti adapter) and `execution_id` (XSIAM native). `/indicators/insert_jsons` accepts both `json_indicators` and `json_objects`. Maintain both.
 - **LLM log generation** — defaults to Ollama (`llama3.2`) at `http://host.docker.internal:11434`. Configured via `.env` `PURPLELAB_LLM_LOG_GENERATION_*`. Falls back gracefully if Ollama is unavailable.
 
@@ -107,10 +110,22 @@ This file is the primary reference for autonomous Claude Code operation on Purpl
 ### Vendor Simulation Domain
 | Backend Module | API Prefix | Frontend Page | Purpose |
 |---------------|------------|---------------|---------|
-| `api/vendor/splunk.py` | `/api/vendor/splunk` | — | Splunk HEC + search + saved-searches |
+| `api/vendor/splunk.py` | `/api/vendor/splunk` | — | Splunk HEC + search + saved-searches (full HEC impl) |
 | `api/vendor/xsiam.py` | `/api/vendor/xsiam` | — | XSIAM XQL async + incidents + isolation |
 | `api/vendor/crowdstrike.py` | `/api/vendor/crowdstrike` | — | CrowdStrike OAuth2 + devices + detections |
 | `api/vendor/defender.py` | `/api/vendor/defender` | — | Defender tenant-auth + machines + alerts |
+| `api/vendor/qradar.py` | `/api/vendor/qradar` | — | QRadar offenses + reference sets + searches |
+| `api/vendor/carbonblack.py` | `/api/vendor/carbonblack` | — | Carbon Black alerts + devices + banning |
+| `api/vendor/okta.py` | `/api/vendor/okta` | — | Okta users/groups/factors/events |
+| `api/vendor/entra.py` | `/api/vendor/entra` | — | Entra ID (Azure AD) users/signin/conditional-access |
+| `api/vendor/elastic.py` | `/api/vendor/elastic` | — | Elastic EQL/KQL search + index management |
+| `api/vendor/sentinelone.py` | `/api/vendor/sentinelone` | — | SentinelOne agents + threats + isolate |
+| `api/vendor/panorama.py` | `/api/vendor/panorama` | — | Palo Alto Panorama firewall + URL filtering |
+| `api/vendor/servicenow.py` | `/api/vendor/servicenow` | — | ServiceNow tickets + CMDB + change requests |
+| `api/vendor/jira.py` | `/api/vendor/jira` | — | Jira issues + transitions + comments |
+| `api/vendor/tenable.py` | `/api/vendor/tenable` | — | Tenable scans + vulnerabilities + assets |
+| `api/vendor/wiz.py` | `/api/vendor/wiz` | — | Wiz cloud issues + configurations |
+| `api/vendor/qualys.py` | `/api/vendor/qualys` | — | Qualys VM scans + vulnerabilities |
 
 ### Pipeline Domain
 | Backend Module | API Prefix | Frontend Page | Purpose |
@@ -138,10 +153,12 @@ This file is the primary reference for autonomous Claude Code operation on Purpl
 ### Infrastructure Domain
 | Backend Module | API Prefix | Frontend Page | Purpose |
 |---------------|------------|---------------|---------|
-| `environments/routes.py` | `/api/v2/environments` | `/environments` | SimulatedEndpoint + SimulatedUser registry |
+| `environments/routes.py` | `/api/v2/environments` | `/environments` | SimulatedEndpoint + SimulatedUser registry + canvas topology |
+| `environments.py` (deploy) | `/api/v2/environments/{id}/deploy` | (canvas "Deploy" button) | Map infra canvas nodes to CMDB asset records |
 | `scenarios/routes.py` | `/api/v2/scenarios` | `/scenarios` | Tabletop exercises + phases + injects |
 | `integrations/cspm.py` | `/api/v2/cspm` | `/cspm` | CSPMCheck + CSPMFinding (optional) |
 | `integrations/vuln_mgmt.py` | `/api/v2/vm` | `/vulnerabilities` | VMVulnerability + CVE/EPSS scoring |
+| `api/v2/threatforge.py` | `/api/v2/threatforge` | (session dialog "From ThreatForge" tab) | Proxy to ThreatForge threat models → ATT&CK techniques |
 
 ---
 

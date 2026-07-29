@@ -2,6 +2,41 @@
 
 ---
 
+## 2026-07-29 — ThreatForge Integration + Infrastructure Canvas + Push to SIEM
+
+### ThreatForge → PurpleLab Wiring
+- `backend/api/v2/threatforge.py` — new proxy module: `GET /api/v2/threatforge/health`, `/models`, `/models/{id}`
+  - Forwards to ThreatForge API (default: `http://host.docker.internal:4000`); configurable via `THREATFORGE_URL` env var
+  - Extracts ATT&CK technique IDs from `mitre_techniques` array; returns sigma_count, threat_count, risk_score
+- `frontend-next/app/sessions/page.tsx` — `NewSessionDialog` two-tab layout:
+  - **Attack Chains** tab: existing behavior unchanged
+  - **From ThreatForge** tab (violet): fetches live threat models, select one → session created with `technique_ids` from STRIDE analysis; session config records `source: "threatforge"`, `threatforge_model_id/name`
+- Registered `threatforge_router` in `backend/api/v2/__init__.py`
+
+### Infrastructure Canvas + Deploy
+- `frontend-next/app/environments/[id]/page.tsx` — drag-and-drop palette with 5 infrastructure categories:
+  - Endpoints (Windows/Linux/Mac/DC/Server), Cloud (AWS/Azure/GCP), Email (Exchange/GSuite/Proofpoint/Mimecast), EDR (CrowdStrike/Defender/SentinelOne/CarbonBlack/XSIAM), ITSM (ServiceNow/Jira)
+  - `InfraNode` custom React Flow node: color-coded by subtype, hostname/IP/users/services fields
+  - Canvas infra nodes wired into session creation: `canvas_infrastructure` → `_derive_log_sources_from_infra()` maps node type to log source IDs stored in `merged_config.infra_log_sources`
+  - "Deploy" button (enabled when infra nodes present) → `POST /api/v2/environments/{id}/deploy`
+- `backend/api/v2/environments.py` — `POST /{id}/deploy` endpoint: generates hostnames/IPs, maps to log sources, saves `deployed_assets` to `environment.settings`
+
+### Push to SIEM
+- `frontend-next/app/sessions/[id]/page.tsx` — "Push to SIEM" button with violet styling, loading state, 6s success feedback showing event count + connection name
+- `backend/api/v2/sessions.py` — `POST /{session_id}/push-to-siem`: collects `GeneratedEvent` records, auto-creates Splunk sim connection if none exists, calls `ConnectionManager.push_logs()`; `_derive_log_sources_from_infra()` helper maps infra node subtypes to log source IDs
+- `backend/api/vendor/splunk.py` — full HEC implementation: `POST /services/collector/event` (newline-delimited JSON), in-memory `_HEC_EVENTS` store, auto-creates notable events from high/critical severity events; `GET /services/collector/health[/1.0]`
+
+### User Guide
+- `frontend-next/app/guide/page.tsx` — 4-tab user guide: Vendor APIs (all 16 vendors with endpoints + auth), Seed Data, Connecting from Joti, Workflows
+- `frontend-next/components/sidebar.tsx` — "User Guide" sidebar link (HelpCircle icon)
+
+### Bug Fixes
+- Canvas template topology guard: template environments store `nodes` as `string[]` — added `typeof nodes[0] === 'object'` check to fall through to auto-layout instead of crashing React Flow
+- `backend/api/v2/sessions.py` — added `Body` to FastAPI imports (was causing startup `NameError`)
+- Celery worker/beat containers restarted with latest backend image
+
+---
+
 ## 2026-06-04 — Vendor Emulation Layer + SOAR Engine + Tabletop Exercises (Phases A–G)
 
 ### Phase A: Product Persona System
