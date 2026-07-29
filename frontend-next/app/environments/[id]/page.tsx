@@ -1969,9 +1969,13 @@ export default function EnvironmentCanvasPage({
           setEnvName(data.name)
 
           const topology = data.settings?.canvas_topology
-          if (topology?.nodes?.length) {
-            setNodes(topology.nodes)
-            setEdges(topology.edges ?? [])
+          // Guard: template topologies store nodes as string[] — fall through to auto-layout
+          const hasValidNodes =
+            topology?.nodes?.length &&
+            typeof (topology.nodes as unknown[])[0] === 'object'
+          if (hasValidNodes) {
+            setNodes(topology!.nodes)
+            setEdges(topology!.edges ?? [])
           } else {
             // Auto-layout from log_sources + siem_platform
             const siemInfo = SIEM_PALETTE.find((s) => s.id === data.siem_platform) ??
